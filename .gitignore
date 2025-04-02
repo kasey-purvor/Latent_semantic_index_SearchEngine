@@ -1,0 +1,13 @@
+# Ignore all files in the data directory
+data/*
+
+# Ignore all files in the processed_data directory
+processed_data/*
+
+# Ignore all pychache files 
+*.pyc
+
+# Ignore all pycache directories
+__pycache__/
+
+
