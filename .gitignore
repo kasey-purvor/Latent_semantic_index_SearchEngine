@@ -10,4 +10,18 @@ processed_data/*
 # Ignore all pycache directories
 __pycache__/
 
+# Ignore evaluation model and results directories
+evaluation/models/*
+evaluation/results/*
+
+# Ignore other common large files
+*.joblib
+*.pkl
+*.model
+*.bin
+*.h5
+*.hdf5
+*.pt
+*.pth
+
 
