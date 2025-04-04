@@ -1,6 +1,6 @@
 """
 Field-weighted LSI implementation.
-Extends the basic LSI with separate field vectors and combined weighting.
+Extends the basic LSI with separate field vectors and adaptive field weighting.
 """
 
 import os
@@ -11,13 +11,14 @@ from typing import Dict, List, Any, Tuple, Optional
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.decomposition import TruncatedSVD
 from sklearn.preprocessing import normalize
-from scipy.sparse import spmatrix
+from scipy.sparse import spmatrix, diags, vstack
 
 from .base import BaseIndexer
 from .lsi import LSIIndexer
+from .utils import combine_fields
 
 class FieldWeightedLSIIndexer(LSIIndexer):
-    """Field-weighted LSI indexer implementation."""
+    """Field-weighted LSI indexer implementation with adaptive field weighting."""
     
     def __init__(self, n_components: int = 150):
         """
@@ -28,10 +29,11 @@ class FieldWeightedLSIIndexer(LSIIndexer):
         """
         super().__init__(n_components)
         self.index_name = "lsi_field_weighted"
-        self.field_vectorizers = {}
-        self.field_svds = {}
-        self._field_vectors = {}
-        self._available_fields = ['titles', 'abstracts', 'bodies', 'topics', 'keywords']
+        self.vectorizer = None  # Single vectorizer for all fields
+        self.svd = None  # Single SVD model
+        self._field_vectors = {}  # TF-IDF vectors for each field
+        self._field_available = {}  # Track which fields are available
+        self._field_weights = {}  # Field weights
     
     def build_index(self, documents: Dict[str, List], output_dir: str) -> None:
         """
@@ -46,108 +48,153 @@ class FieldWeightedLSIIndexer(LSIIndexer):
         # Store document info for search results
         self._store_document_info(documents)
         
-        # Process each field separately
-        self._process_fields(documents)
+        # Step 1: Combine all fields to create a common vocabulary
+        logging.info("Creating common vocabulary from all fields")
+        combined_texts = combine_fields(documents)
         
-        # Combine the field vectors with weights
-        self._combine_field_vectors()
+        # Step 2: Create and fit the TF-IDF vectorizer on combined texts
+        logging.info("Fitting TF-IDF vectorizer on combined texts")
+        self.vectorizer = self._create_tfidf_vectorizer()
+        self.vectorizer.fit(combined_texts)
+        
+        # Step 3: Create TF-IDF vectors for each field separately
+        logging.info("Creating separate TF-IDF vectors for each field")
+        self._create_field_vectors(documents)
+        
+        # Step 4: Apply adaptive field weighting
+        logging.info("Applying adaptive field weighting")
+        combined_vectors = self._apply_field_weighting()
+        
+        # Step 5: Apply LSI to the combined weighted vectors
+        logging.info(f"Applying SVD to reduce to {self.n_components} dimensions")
+        self._doc_vectors = self._apply_lsi(combined_vectors)
         
         # Save the index
         self._save_index(output_dir)
         logging.info("Field-weighted LSI index built successfully")
     
-    def _process_fields(self, documents: Dict[str, List]) -> None:
+    def _create_field_vectors(self, documents: Dict[str, List]) -> None:
         """
-        Process each field separately.
+        Create TF-IDF vectors for each field using the common vocabulary.
         
         Args:
             documents: Dictionary containing document fields
         """
-        for field in self._available_fields:
-            if field in documents and any(documents[field]):
-                logging.info(f"Processing field: {field}")
+        # For each available field, create TF-IDF vectors
+        self._field_vectors = {}
+        self._field_available = {}
+        num_docs = len(documents['paper_ids'])
+        
+        for field_name in self._available_field_names:
+            if field_name in documents and any(documents[field_name]):
+                logging.info(f"Processing field: {field_name}")
                 
                 # For fields with missing values, replace with empty strings
-                field_texts = [text if text else "" for text in documents[field]]
+                field_texts = []
+                field_mask = np.zeros(num_docs)
                 
-                # Create TF-IDF matrix for this field using the parent's method
-                field_matrix, vectorizer, _ = self._create_tfidf_matrix(field_texts)
+                for i in range(num_docs):
+                    if i < len(documents[field_name]) and documents[field_name][i]:
+                        field_texts.append(documents[field_name][i])
+                        field_mask[i] = 1.0
+                    else:
+                        field_texts.append("")
                 
-                # Store the vectorizer
-                self.field_vectorizers[field] = vectorizer
-                
-                # Apply LSI to this field using the parent's method
+                # Transform field texts using the common vectorizer
                 try:
-                    field_vectors = self._apply_lsi_to_field(field_matrix)
+                    field_vectors = self.vectorizer.transform(field_texts)
                     
-                    # Store the field vectors
-                    self._field_vectors[field] = field_vectors
+                    # Store the field vectors and availability mask
+                    self._field_vectors[field_name] = field_vectors
+                    self._field_available[field_name] = field_mask
                     
-                    logging.info(f"Field {field}: {field_vectors.shape[1]} dimensions")
-                except ValueError as e:
-                    logging.warning(f"Error processing field {field}: {e}")
+                    logging.info(f"Field {field_name}: {field_vectors.shape[1]} terms, {np.sum(field_mask)} non-empty documents")
+                except Exception as e:
+                    logging.warning(f"Error processing field {field_name}: {e}")
     
-    def _apply_lsi_to_field(self, field_matrix: spmatrix) -> np.ndarray:
+    def _apply_field_weighting(self) -> spmatrix:
         """
-        Apply LSI to a field TF-IDF matrix.
+        Apply field weights to TF-IDF vectors with adaptive scaling for missing fields.
+        
+        Returns:
+            Combined weighted document vectors
+        """
+        # Get field weights from default weights
+        self._field_weights = {
+            field_name.rstrip('s'): self.DEFAULT_FIELD_WEIGHTS.get(field_name.rstrip('s'), 1.0)
+            for field_name in self._field_vectors.keys()
+        }
+        
+        # Calculate the total weight (theoretical maximum if all fields present)
+        total_weight = sum(self._field_weights.values())
+        
+        # Initialize the combined vectors
+        num_docs = len(self._doc_info)
+        combined_vectors = None
+        
+        # Create masks for empty documents in each field
+        field_masks = {}
+        doc_weights = np.zeros(num_docs)
+        
+        # Process each field
+        for field_name in self._field_vectors.keys():
+            field_key = field_name.rstrip('s')
+            field_weight = self._field_weights.get(field_key, 1.0)
+            
+            # Get the field availability mask
+            field_mask = self._field_available.get(field_name, np.zeros(num_docs))
+            field_masks[field_name] = field_mask
+            
+            # Add the weight to the document weights where field is available
+            doc_weights += field_mask * field_weight
+        
+        # Calculate adaptive scaling factors
+        scaling_factors = np.divide(total_weight, doc_weights, 
+                                   out=np.ones_like(doc_weights), 
+                                   where=doc_weights>0)
+        
+        # Apply weights with scaling to each field
+        for field_name, field_vectors in self._field_vectors.items():
+            field_key = field_name.rstrip('s')
+            field_weight = self._field_weights.get(field_key, 1.0)
+            field_mask = field_masks[field_name]
+            
+            # Create scaled weights for this field
+            scaled_weights = field_mask * field_weight * scaling_factors
+            
+            # Apply the weights to the field vectors using diagonal matrix
+            weighted_vectors = diags(scaled_weights).dot(field_vectors)
+            
+            # Add to combined vectors
+            if combined_vectors is None:
+                combined_vectors = weighted_vectors
+            else:
+                combined_vectors += weighted_vectors
+        
+        # Store the scaling factors for reference
+        self._scaling_factors = scaling_factors.tolist()
+        
+        return combined_vectors
+    
+    def _apply_lsi(self, X_tfidf: spmatrix) -> np.ndarray:
+        """
+        Apply LSI (truncated SVD) to a TF-IDF matrix.
         
         Args:
-            field_matrix: Field TF-IDF matrix
+            X_tfidf: TF-IDF matrix
             
         Returns:
-            Field vectors in LSI space
+            Document vectors in LSI space
         """
-        n_components = min(self.n_components, field_matrix.shape[1] - 1, field_matrix.shape[0] - 1)
+        n_components = min(self.n_components, X_tfidf.shape[1] - 1, X_tfidf.shape[0] - 1)
         if n_components <= 0:
             raise ValueError("Not enough documents/terms for SVD")
             
-        svd = TruncatedSVD(n_components=n_components, random_state=42)
-        field_vectors = svd.fit_transform(field_matrix)
+        self.svd = TruncatedSVD(n_components=n_components, random_state=42)
+        doc_vectors = self.svd.fit_transform(X_tfidf)
         
-        # Store the SVD model
-        field_name = next((field for field, vec in self.field_vectorizers.items() 
-                          if id(vec) == id(self.field_vectorizers[field])), None)
-        if field_name:
-            self.field_svds[field_name] = svd
-        
-        # Normalize the field vectors
-        return normalize(field_vectors)
-    
-    def _combine_field_vectors(self) -> None:
-        """Combine field vectors using the field weights."""
-        n_docs = len(self._doc_info)
-        n_dims = self.n_components
-        
-        # Initialize combined vectors
-        combined_vectors = np.zeros((n_docs, n_dims))
-        
-        # Track weights used for each document
-        doc_weights = np.zeros(n_docs)
-        
-        # Combine field vectors based on weights
-        for field, vectors in self._field_vectors.items():
-            # Skip fields with no vectors
-            if vectors.shape[0] == 0:
-                continue
-                
-            # Get the weight for this field
-            field_weight = self.DEFAULT_FIELD_WEIGHTS.get(field.rstrip('s'), 1.0)
-            
-            # Pad or trim vectors to match n_dims
-            padded_vectors = np.zeros((vectors.shape[0], n_dims))
-            padded_vectors[:, :vectors.shape[1]] = vectors
-            
-            # Add weighted vectors to combined vectors
-            combined_vectors += padded_vectors * field_weight
-            doc_weights += field_weight
-        
-        # Normalize by total weight for each document
-        doc_weights = np.maximum(doc_weights, 1e-10)  # Avoid division by zero
-        for i in range(n_docs):
-            combined_vectors[i] /= doc_weights[i]
-        
-        # Normalize the combined vectors
-        self._doc_vectors = normalize(combined_vectors)
+        # Normalize document vectors
+        return normalize(doc_vectors)
     
     def _save_index(self, output_dir: str) -> None:
         """
@@ -164,25 +211,31 @@ class FieldWeightedLSIIndexer(LSIIndexer):
             'num_documents': len(self._doc_info),
             'n_components': self.n_components,
             'fields': list(self._field_vectors.keys()),
-            'field_weights': self.DEFAULT_FIELD_WEIGHTS
+            'field_weights': self._field_weights,
+            'explained_variance': np.sum(self.svd.explained_variance_ratio_) if self.svd is not None else 0,
+            'field_scaling': {
+                'total_weight': sum(self._field_weights.values()),
+                'adaptive_scaling_applied': True
+            }
         }
         
         # Create directories if they don't exist
         os.makedirs(output_dir, exist_ok=True)
         
-        # Save field vectorizers
-        for field, vectorizer in self.field_vectorizers.items():
-            joblib.dump(vectorizer, os.path.join(output_dir, f'{self.index_name}_{field}_vectorizer.joblib'))
+        # Save vectorizer (common for all fields)
+        joblib.dump(self.vectorizer, os.path.join(output_dir, f'{self.index_name}_vectorizer.joblib'))
         
-        # Save field SVD models
-        for field, svd in self.field_svds.items():
-            joblib.dump(svd, os.path.join(output_dir, f'{self.index_name}_{field}_svd.joblib'))
+        # Save SVD model
+        joblib.dump(self.svd, os.path.join(output_dir, f'{self.index_name}_svd.joblib'))
         
         # Save field vectors
         for field, vectors in self._field_vectors.items():
             joblib.dump(vectors, os.path.join(output_dir, f'{self.index_name}_{field}_vectors.joblib'))
         
-        # Save combined document vectors
+        # Save field availability masks
+        joblib.dump(self._field_available, os.path.join(output_dir, f'{self.index_name}_field_available.joblib'))
+        
+        # Save document vectors
         joblib.dump(self._doc_vectors, os.path.join(output_dir, f'{self.index_name}_doc_vectors.joblib'))
         
         # Save document info
@@ -207,23 +260,29 @@ class FieldWeightedLSIIndexer(LSIIndexer):
         if 'n_components' in self._metadata:
             self.n_components = self._metadata['n_components']
         
-        # Load field vectorizers, SVD models, and vectors
+        if 'field_weights' in self._metadata:
+            self._field_weights = self._metadata['field_weights']
+        
+        # Load vectorizer (common for all fields)
+        self.vectorizer = joblib.load(os.path.join(index_dir, f'{self.index_name}_vectorizer.joblib'))
+        
+        # Load SVD model
+        self.svd = joblib.load(os.path.join(index_dir, f'{self.index_name}_svd.joblib'))
+        
+        # Load field availability masks
+        field_available_path = os.path.join(index_dir, f'{self.index_name}_field_available.joblib')
+        if os.path.exists(field_available_path):
+            self._field_available = joblib.load(field_available_path)
+        
+        # Load field vectors
+        self._field_vectors = {}
         if 'fields' in self._metadata:
             for field in self._metadata['fields']:
-                vectorizer_path = os.path.join(index_dir, f'{self.index_name}_{field}_vectorizer.joblib')
-                svd_path = os.path.join(index_dir, f'{self.index_name}_{field}_svd.joblib')
                 vectors_path = os.path.join(index_dir, f'{self.index_name}_{field}_vectors.joblib')
-                
-                if os.path.exists(vectorizer_path):
-                    self.field_vectorizers[field] = joblib.load(vectorizer_path)
-                
-                if os.path.exists(svd_path):
-                    self.field_svds[field] = joblib.load(svd_path)
-                
                 if os.path.exists(vectors_path):
                     self._field_vectors[field] = joblib.load(vectors_path)
         
-        # Load combined document vectors
+        # Load document vectors
         self._doc_vectors = joblib.load(os.path.join(index_dir, f'{self.index_name}_doc_vectors.joblib'))
         
         # Load document info
@@ -241,41 +300,17 @@ class FieldWeightedLSIIndexer(LSIIndexer):
         Returns:
             Query vector in LSI space
         """
-        # Process query for each field
-        field_query_vectors = {}
-        for field, vectorizer in self.field_vectorizers.items():
-            if field in self.field_svds:
-                # Transform query to TF-IDF vector for this field
-                query_tfidf = vectorizer.transform([query])
-                
-                # Project query into LSI space for this field
-                svd = self.field_svds[field]
-                query_lsi = svd.transform(query_tfidf)
-                
-                # Store query vector for this field
-                field_query_vectors[field] = query_lsi
-        
-        # Combine query vectors with weights
-        combined_query = np.zeros((1, self.n_components))
-        total_weight = 0
-        
-        for field, query_vector in field_query_vectors.items():
-            field_weight = self.DEFAULT_FIELD_WEIGHTS.get(field.rstrip('s'), 1.0)
+        if self.vectorizer is None or self.svd is None:
+            raise ValueError("Index must be built or loaded before searching")
             
-            # Pad or trim vector to match n_dims
-            padded_vector = np.zeros((1, self.n_components))
-            padded_vector[:, :query_vector.shape[1]] = query_vector
-            
-            # Add weighted vector to combined vector
-            combined_query += padded_vector * field_weight
-            total_weight += field_weight
+        # Transform query using the common vectorizer
+        query_tfidf = self.vectorizer.transform([query])
         
-        # Normalize by total weight
-        if total_weight > 0:
-            combined_query /= total_weight
+        # Project query into LSI space
+        query_lsi = self.svd.transform(query_tfidf)
         
         # Normalize query vector
-        return normalize(combined_query)
+        return normalize(query_lsi)
     
     def search(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
         """
@@ -288,13 +323,13 @@ class FieldWeightedLSIIndexer(LSIIndexer):
         Returns:
             List of search results with scores
         """
-        if not self.field_vectorizers or self._doc_vectors is None:
+        if self._doc_vectors is None:
             raise ValueError("Index must be built or loaded before searching")
         
         # Process query
         query_vector = self._process_query(query)
         
-        # Calculate cosine similarity between query and documents
+        # Calculate cosine similarity
         scores = np.dot(self._doc_vectors, query_vector.T).flatten()
         
         # Get top-k results

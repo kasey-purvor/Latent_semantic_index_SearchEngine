@@ -17,7 +17,7 @@ from sentence_transformers import SentenceTransformer
 from .field_weighted_lsi import FieldWeightedLSIIndexer
 
 class BertEnhancedIndexer(FieldWeightedLSIIndexer):
-    """BERT-enhanced LSI indexer implementation."""
+    """BERT-enhanced LSI indexer implementation that adds keyword extraction to field-weighted LSI."""
     
     def __init__(self, n_components: int = 150):
         """
@@ -31,6 +31,10 @@ class BertEnhancedIndexer(FieldWeightedLSIIndexer):
         self.index_name = "lsi_bert_enhanced"
         self.bert_model = None
         self.keybert_model = None
+        
+        # Add 'keywords' to available fields
+        if 'keywords' not in self._available_field_names:
+            self._available_field_names.append('keywords')
     
     def build_index(self, documents: Dict[str, List], output_dir: str) -> None:
         """
@@ -56,11 +60,13 @@ class BertEnhancedIndexer(FieldWeightedLSIIndexer):
             logging.error(f"Error initializing BERT models: {e}")
             raise
         
-        # Extract keywords using KeyBERT
+        # Extract keywords using KeyBERT and add them to documents
         logging.info("Extracting keywords with KeyBERT")
         documents['keywords'] = self._extract_keywords(documents)
         
         # Call the parent class to build the field-weighted index
+        # This will create a single vocabulary on all fields (including keywords)
+        # and then apply adaptive weighting
         super().build_index(documents, output_dir)
         
         # Update metadata to reflect BERT enhancement
@@ -86,8 +92,8 @@ class BertEnhancedIndexer(FieldWeightedLSIIndexer):
         # Combine title and abstract for keyword extraction
         combined_texts = []
         for i in range(len(documents['paper_ids'])):
-            title = documents['titles'][i] if documents['titles'][i] else ""
-            abstract = documents['abstracts'][i] if documents['abstracts'][i] else ""
+            title = documents['titles'][i] if i < len(documents['titles']) and documents['titles'][i] else ""
+            abstract = documents['abstracts'][i] if i < len(documents['abstracts']) and documents['abstracts'][i] else ""
             combined_texts.append(f"{title} {abstract}".strip())
         
         # Process documents in batches
@@ -106,7 +112,7 @@ class BertEnhancedIndexer(FieldWeightedLSIIndexer):
                 # Extract keywords for this batch
                 batch_keywords = self.keybert_model.extract_keywords(
                     docs=batch,
-                    keyphrase_ngram_range=(1, 3),
+                    keyphrase_ngram_range=(1, 1),
                     stop_words='english',
                     use_mmr=True,
                     diversity=0.7,

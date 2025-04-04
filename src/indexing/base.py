@@ -35,6 +35,8 @@ class BaseIndexer(ABC):
             'topics': 2.0,
             'keywords': 3.0
         }
+        # List of standard field names (plural form as used in document dictionaries)
+        self._available_field_names = ['titles', 'abstracts', 'bodies', 'topics']
         self._index = None
         self._documents = []
         self._metadata = {}

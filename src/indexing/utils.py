@@ -104,36 +104,56 @@ def extract_fields(papers: List[Dict[str, Any]]) -> Dict[str, List]:
 
 def combine_fields(
     fields: Dict[str, List], 
-    field_weights: Dict[str, float],
+    field_weights: Optional[Dict[str, float]] = None,
     normalize: bool = True
 ) -> List[str]:
     """
-    Combine document fields with weights.
+    Combine document fields.
+    
+    When field_weights is provided, applies weights to each field.
+    Otherwise, simply concatenates the fields with a space separator.
     
     Args:
         fields: Dictionary of field lists
-        field_weights: Dictionary of field weights
-        normalize: Whether to normalize the weights
+        field_weights: Optional dictionary of field weights
+        normalize: Whether to normalize the weights (only used when weights are provided)
         
     Returns:
         List of combined field texts
     """
+    num_docs = len(fields['paper_ids'])
+    
+    # Simple concatenation mode (for basic LSI)
+    if field_weights is None:
+        combined_texts = []
+        for i in range(num_docs):
+            parts = []
+            # Add each field if it exists and is not empty
+            for field_name in ['titles', 'abstracts', 'bodies', 'topics', 'keywords']:
+                if field_name in fields and i < len(fields[field_name]) and fields[field_name][i]:
+                    parts.append(fields[field_name][i])
+            combined_texts.append(' '.join(parts))
+        return combined_texts
+    
+    # Field weighting mode (for field-weighted LSI)
     # Normalize weights if requested
     if normalize:
         total_weight = sum(field_weights.values())
         field_weights = {k: v/total_weight for k, v in field_weights.items()}
     
     combined_texts = []
-    num_docs = len(fields['paper_ids'])
     
     for i in range(num_docs):
         combined_text = []
         
         # Add each field with its weight
         for field_name, weight in field_weights.items():
-            if field_name in fields and fields[field_name][i]:
+            # Handle singular/plural field name conversion
+            field_list_name = f"{field_name}s" if not field_name.endswith('s') else field_name
+            
+            if field_list_name in fields and i < len(fields[field_list_name]) and fields[field_list_name][i]:
                 # Repeat the field text based on its weight
-                field_text = fields[field_name][i]
+                field_text = fields[field_list_name][i]
                 combined_text.extend([field_text] * int(weight * 10))  # Scale weight for better granularity
         
         combined_texts.append(' '.join(combined_text))

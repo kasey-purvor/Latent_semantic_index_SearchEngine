@@ -144,7 +144,7 @@ def handle_search_command(args: argparse.Namespace) -> None:
     if not hasattr(args, 'top_n'):
         args.top_n = 10
         
-    # Load the appropriate indexer - using relative imports
+    # Load the appropriate indexer. 
     if args.index_type == 'bm25':
         from indexing.bm25 import BM25Indexer
         indexer = BM25Indexer()

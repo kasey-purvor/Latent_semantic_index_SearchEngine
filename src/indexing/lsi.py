@@ -16,7 +16,7 @@ from .base import BaseIndexer
 from .utils import combine_fields
 
 class LSIIndexer(BaseIndexer):
-    """Basic LSI indexer implementation."""
+    """Basic LSI indexer implementation without field weighting."""
     
     def __init__(self, n_components: int = 150):
         """
@@ -46,9 +46,9 @@ class LSIIndexer(BaseIndexer):
         # Store document info for search results
         self._store_document_info(documents)
         
-        # Combine fields with weights
-        logging.info("Combining fields with weights")
-        combined_texts = combine_fields(documents, self.DEFAULT_FIELD_WEIGHTS)
+        # Combine fields without weights - simple concatenation
+        logging.info("Combining document fields without weighting")
+        combined_texts = combine_fields(documents)
         
         # Create TF-IDF matrix
         X_tfidf, self.vectorizer, self._terms = self._create_tfidf_matrix(combined_texts)
