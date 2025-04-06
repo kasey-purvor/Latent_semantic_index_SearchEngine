@@ -10,9 +10,11 @@ processed_data/*
 # Ignore all pycache directories
 __pycache__/
 
-# Ignore evaluation model and results directories
+# Ignore evaluation directories and files
+# evaluation/*
 evaluation/models/*
-evaluation/results/*
+evaluation/judgeblender/**
+
 
 # Ignore other common large files
 *.joblib

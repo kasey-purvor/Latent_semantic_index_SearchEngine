@@ -48,9 +48,9 @@ class BM25Indexer(BaseIndexer):
                 'abstract': documents['abstracts'][i]
             })
         
-        # Combine fields with weights
-        logging.info("Combining fields with weights")
-        combined_texts = combine_fields(documents, self.DEFAULT_FIELD_WEIGHTS)
+        # Combine fields without weights
+        logging.info("Combining document fields")
+        combined_texts = combine_fields(documents)
         
         # Create vectorizer
         logging.info("Creating document-term matrix")
