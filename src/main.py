@@ -67,7 +67,7 @@ def setup_argparse() -> argparse.ArgumentParser:
     search_parser.add_argument('--method', choices=['binary', 'tfidf', 'log_entropy'], 
                               default='binary', help='Query representation method')
     search_parser.add_argument('--data-dir', default=DEFAULT_DATA_DIR, help='Directory with original JSON data (for result expansion)')
-    search_parser.add_argument('--top-n', type=int, default=10, help='Number of results to return')
+    search_parser.add_argument('--top-n', type=int, default=50, help='Number of results to return')
     search_parser.add_argument('--query', help='Search query (if not provided, interactive mode is used)')
     search_parser.add_argument('--index-type', choices=list(INDEX_TYPES.keys()), 
                             default='lsi_field_weighted', help='Type of index to use for search')
@@ -142,7 +142,7 @@ def handle_search_command(args: argparse.Namespace) -> None:
     if not hasattr(args, 'method'):
         args.method = 'binary'
     if not hasattr(args, 'top_n'):
-        args.top_n = 10
+        args.top_n = 50
         
     # Load the appropriate indexer. 
     if args.index_type == 'bm25':
@@ -351,7 +351,7 @@ def prompt_for_command() -> argparse.Namespace:
         args.command = 'search'
         args.model_dir = DEFAULT_MODEL_DIR
         args.method = 'binary'
-        args.top_n = 10
+        args.top_n = 50
         args.query = None
         
         print("\nAvailable index types:")

@@ -35,7 +35,7 @@ RESULTS_DIR = Path(__file__).parent / "results"
 EVALUATION_DIR = Path(__file__).parent / "evaluations"
 JUDGE_MODELS_DIR = Path(__file__).parent / "judgeblender"
 TEMP_DIR = Path(__file__).parent / "temp"
-DEFAULT_BATCH_SIZE = 24
+DEFAULT_BATCH_SIZE = 1
 DEFAULT_RESULTS_FILE = RESULTS_DIR / "pooled_results.json"
 
 # Create temp directory if it doesn't exist
@@ -154,7 +154,7 @@ class GemmaJudge(JudgeModel):
             "text-generation",
             model=model,
             tokenizer=tokenizer,
-            max_new_tokens=512,
+            max_new_tokens=32,
             do_sample=False
         )
         logging.info("Gemma model loaded successfully")
@@ -278,7 +278,7 @@ class MistralJudge(JudgeModel):
             "text-generation",
             model=model,
             tokenizer=tokenizer,
-            max_new_tokens=512,
+            max_new_tokens=32,
             do_sample=False
         )
         logging.info("Mistral model loaded successfully")
@@ -396,6 +396,8 @@ def format_evaluation_prompt(query_data: Dict[str, Any], result: Dict[str, Any])
     title = result.get('title', 'No title available')
     abstract = result.get('abstract', 'No abstract available')
     
+    # Comment out full text inclusion to speed up processing
+    """
     # Check for full text in various possible field names
     full_text = None
     for field in ['fullText', 'body_text', 'full_text', 'text']:
@@ -410,6 +412,10 @@ def format_evaluation_prompt(query_data: Dict[str, Any], result: Dict[str, Any])
         if isinstance(full_text, str) and full_text.strip():
             truncated_text = full_text[:1000] + "..." if len(full_text) > 1000 else full_text
             text_section = f"\nFull Text (excerpt):\n{truncated_text}"
+    """
+    
+    # Set text_section to empty string since we're skipping full text
+    text_section = ""
     
     # Format prompt
     prompt = f"""You are a judge evaluating the relevance of a search result for an academic search query.
@@ -508,8 +514,15 @@ def run_sequential_evaluation(results_file: Path, batch_size: int = DEFAULT_BATC
             batch_prompts = all_prompts[i:i+batch_size]
             batch_indices = task_indices[i:i+batch_size]
             
+            batch_num = i//batch_size + 1
+            total_batches = (len(all_prompts) + batch_size - 1)//batch_size
+            logging.info(f"Starting Gemma batch {batch_num}/{total_batches} at {time.strftime('%H:%M:%S')}")
+            batch_start_time = time.time()
+            
             try:
                 batch_results = gemma_judge.evaluate_batch(batch_prompts, batch_size)
+                batch_end_time = time.time()
+                batch_duration = batch_end_time - batch_start_time
                 
                 for j, evaluation in enumerate(batch_results):
                     query_id, result_index = batch_indices[j]
@@ -518,10 +531,16 @@ def run_sequential_evaluation(results_file: Path, batch_size: int = DEFAULT_BATC
                 
                 # Update progress
                 processed += len(batch_prompts)
+                items_per_second = len(batch_prompts) / batch_duration if batch_duration > 0 else 0
+                remaining_batches = total_batches - batch_num
+                est_remaining_time = (remaining_batches * batch_duration) / 60  # minutes
+                
+                logging.info(f"Gemma: Batch {batch_num} completed in {batch_duration:.2f}s ({items_per_second:.2f} items/sec)")
                 logging.info(f"Gemma: Processed {processed}/{total_tasks} ({processed/total_tasks*100:.1f}%)")
+                logging.info(f"Gemma: Est. remaining time: {est_remaining_time:.1f} minutes")
                 
             except Exception as e:
-                logging.error(f"Error evaluating batch {i//batch_size} with Gemma: {e}")
+                logging.error(f"Error evaluating batch {batch_num}/{total_batches} with Gemma: {e}")
         
         # Save Gemma results to temp file
         with open(TEMP_DIR / "gemma_results.json", 'w') as f:
@@ -551,8 +570,15 @@ def run_sequential_evaluation(results_file: Path, batch_size: int = DEFAULT_BATC
             batch_prompts = all_prompts[i:i+batch_size]
             batch_indices = task_indices[i:i+batch_size]
             
+            batch_num = i//batch_size + 1
+            total_batches = (len(all_prompts) + batch_size - 1)//batch_size
+            logging.info(f"Starting Mistral batch {batch_num}/{total_batches} at {time.strftime('%H:%M:%S')}")
+            batch_start_time = time.time()
+            
             try:
                 batch_results = mistral_judge.evaluate_batch(batch_prompts, batch_size)
+                batch_end_time = time.time()
+                batch_duration = batch_end_time - batch_start_time
                 
                 for j, evaluation in enumerate(batch_results):
                     query_id, result_index = batch_indices[j]
@@ -561,10 +587,16 @@ def run_sequential_evaluation(results_file: Path, batch_size: int = DEFAULT_BATC
                 
                 # Update progress
                 processed += len(batch_prompts)
+                items_per_second = len(batch_prompts) / batch_duration if batch_duration > 0 else 0
+                remaining_batches = total_batches - batch_num
+                est_remaining_time = (remaining_batches * batch_duration) / 60  # minutes
+                
+                logging.info(f"Mistral: Batch {batch_num} completed in {batch_duration:.2f}s ({items_per_second:.2f} items/sec)")
                 logging.info(f"Mistral: Processed {processed}/{total_tasks} ({processed/total_tasks*100:.1f}%)")
+                logging.info(f"Mistral: Est. remaining time: {est_remaining_time:.1f} minutes")
                 
             except Exception as e:
-                logging.error(f"Error evaluating batch {i//batch_size} with Mistral: {e}")
+                logging.error(f"Error evaluating batch {batch_num}/{total_batches} with Mistral: {e}")
         
         # Save Mistral results to temp file
         with open(TEMP_DIR / "mistral_results.json", 'w') as f:

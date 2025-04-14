@@ -27,7 +27,9 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
+
 # Constants
+QUERY_RESULTS = 50
 SEARCH_ENGINE_VARIANTS = {
     1: "BM25 baseline",
     2: "Basic LSI with k=150 dimensions",
@@ -54,7 +56,7 @@ def ensure_results_directory():
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     
 
-def run_query_on_search_engine(query: str, variant_id: int, top_n: int = 10) -> List[Dict[str, Any]]:
+def run_query_on_search_engine(query: str, variant_id: int, top_n: int = 50) -> List[Dict[str, Any]]:
     """
     Run a query on one of the search engine variants.
     
@@ -161,6 +163,7 @@ def run_all_queries():
         
         for variant_id in SEARCH_ENGINE_VARIANTS.keys():
             try:
+                # Using the default top_n parameter (50)
                 results = run_query_on_search_engine(query_text, variant_id)
                 variant_name = SEARCH_ENGINE_VARIANTS[variant_id]
                 query_results[variant_name] = results

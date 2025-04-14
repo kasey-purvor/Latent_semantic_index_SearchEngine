@@ -96,7 +96,7 @@ class BaseIndexer(ABC):
         pass
         
     @abstractmethod
-    def search(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
+    def search(self, query: str, top_k: int = 50) -> List[Dict[str, Any]]:
         """
         Search using the index.
         

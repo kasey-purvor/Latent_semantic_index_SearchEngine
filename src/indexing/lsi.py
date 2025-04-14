@@ -225,7 +225,7 @@ class LSIIndexer(BaseIndexer):
         # Normalize query vector
         return normalize(query_lsi)
     
-    def search(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
+    def search(self, query: str, top_k: int = 50) -> List[Dict[str, Any]]:
         """
         Search for documents using LSI similarity.
         

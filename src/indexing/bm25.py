@@ -159,7 +159,7 @@ class BM25Indexer(BaseIndexer):
         
         logging.info("BM25 index loaded successfully")
     
-    def search(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
+    def search(self, query: str, top_k: int = 50) -> List[Dict[str, Any]]:
         """
         Search for documents using BM25 ranking.
         
