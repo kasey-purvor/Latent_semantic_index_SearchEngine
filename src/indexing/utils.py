@@ -39,6 +39,13 @@ def load_papers(directory_path: str, limit: Optional[int] = None) -> List[Dict[s
                     # Add file path information for reference
                     paper_data['file_path'] = file_path
                     papers.append(paper_data)
+                    
+                    # Log ID fields for the first few papers
+                    if counter <= 3:
+                        id_fields = [field for field in ['id', 'coreId', 'paperId', 'documentId'] if field in paper_data]
+                        logging.info(f"Paper {counter} has ID fields: {id_fields}")
+                        for field in id_fields:
+                            logging.info(f"  {field}: {paper_data.get(field)}")
                                         
                 except Exception as e:  
                     logging.error(f"Error loading {file_path}: {e}")

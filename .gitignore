@@ -14,6 +14,9 @@ __pycache__/
 # evaluation/*
 evaluation/models/*
 evaluation/judgeblender/**
+evaluation/results/*
+evaluation/evaluations/*
+evaluation/temp/*
 
 
 # Ignore other common large files

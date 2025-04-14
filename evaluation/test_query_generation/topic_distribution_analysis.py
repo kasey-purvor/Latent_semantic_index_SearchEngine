@@ -56,7 +56,7 @@ class TopicDistributionAnalyzer:
                  output_dir: str = "./evaluation/test_query_generation/output",
                  num_topics: int = 100,
                  random_seed: int = 42,
-                 use_full_text: bool = False,
+                 use_full_text: bool = True,
                  ignore_incomplete_docs: bool = False):
         """
         Initialize the topic distribution analyzer
@@ -352,7 +352,7 @@ class TopicDistributionAnalyzer:
         # Create a DataFrame for the topic distribution
         topic_data = []
         for topic_id in range(self.num_topics):
-            keywords = ', '.join([word for word, _ in results['topic_keywords'][topic_id][:5]])
+            keywords = ', '.join([word for word, _ in results['topic_keywords'][topic_id][:10]])
             topic_data.append({
                 'Topic': f'Topic {topic_id}',
                 'Keywords': keywords,

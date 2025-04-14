@@ -49,7 +49,7 @@ def main():
     # Print top topics
     print("\nTop 5 topics identified:")
     for i, topic_id in enumerate(results['top_topics'][:20]):
-        keywords = ', '.join([word for word, _ in results['topic_keywords'][topic_id][:5]])
+        keywords = ', '.join([word for word, _ in results['topic_keywords'][topic_id][:10]])
         proportion = results['overall_topic_distribution'][topic_id] * 100
         print(f"{i+1}. Topic {topic_id} ({proportion:.1f}%): {keywords}")
     
