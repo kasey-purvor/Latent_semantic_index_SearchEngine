@@ -56,17 +56,17 @@ def ensure_results_directory():
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     
 
-def run_query_on_search_engine(query: str, variant_id: int, top_n: int = 50) -> List[Dict[str, Any]]:
+def run_query_on_search_engine(query: str, variant_id: int, top_n: int = 50):
     """
-    Run a query on one of the search engine variants.
+    Run a query on a specific search engine variant
     
     Args:
-        query: The search query text
-        variant_id: Search engine variant ID (1-4)
-        top_n: Number of results to return
+        query: The search query to run
+        variant_id: The identifier for the search engine variant
+        top_n: Number of top results to return (default 50)
         
     Returns:
-        List of search results
+        List of search results with expanded content
     """
     global papers_data, loaded_indexers
     
@@ -75,6 +75,7 @@ def run_query_on_search_engine(query: str, variant_id: int, top_n: int = 50) -> 
     
     from indexing import load_papers
     from src.main import DEFAULT_DATA_DIR, DEFAULT_MODEL_DIR
+    from faiss_bert_reranking import BertFaissReranker
     
     # Load papers data only once across all queries
     if papers_data is None:
@@ -116,6 +117,33 @@ def run_query_on_search_engine(query: str, variant_id: int, top_n: int = 50) -> 
     # Search for documents
     logging.info(f"Running query '{query}' on {SEARCH_ENGINE_VARIANTS[variant_id]}")
     results = indexer.search(query, top_k=top_n)
+    
+    # Skip BERT reranking for BM25 as it should remain a pure baseline
+    if index_type != 'bm25':
+        # Initialize BERT reranker and rerank results
+        try:
+            logging.info(f"Applying BERT-FAISS reranking to search results")
+            bert_reranker = BertFaissReranker(model_name="C-KAI/sbert-academic-group44")
+            bert_reranker.initialize()
+            
+            # Ensure all search results have string paper_id for consistent matching
+            for result in results:
+                if 'paper_id' in result and result['paper_id'] is not None:
+                    result['paper_id'] = str(result['paper_id'])
+            
+            # Apply reranking
+            reranking_top_k = min(10, len(results))  # Rerank top 10 results or all if less than 10
+            results = bert_reranker.rerank(query, results, top_k=reranking_top_k)
+            logging.info(f"Reranking complete. Returning top {reranking_top_k} results.")
+        except Exception as e:
+            logging.error(f"Failed to initialize BERT reranker or rerank results: {e}")
+            logging.info("Continuing with non-reranked results")
+    else:
+        logging.info(f"Skipping BERT-FAISS reranking for BM25 baseline")
+        # Still ensure paper_id is string for consistency
+        for result in results:
+            if 'paper_id' in result and result['paper_id'] is not None:
+                result['paper_id'] = str(result['paper_id'])
     
     # Debug: Check what fields the search engine returns directly
     if results and len(results) > 0:

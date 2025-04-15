@@ -19,6 +19,7 @@ from typing import List, Dict, Any, Optional, Tuple
 import torch
 from torch import bfloat16
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+import re
 
 # Add project root to path to allow imports
 project_root = Path(__file__).parent.parent
@@ -35,7 +36,8 @@ RESULTS_DIR = Path(__file__).parent / "results"
 EVALUATION_DIR = Path(__file__).parent / "evaluations"
 JUDGE_MODELS_DIR = Path(__file__).parent / "judgeblender"
 TEMP_DIR = Path(__file__).parent / "temp"
-DEFAULT_BATCH_SIZE = 1
+DEFAULT_BATCH_SIZE = 8  # Number of prompts to process in one function call
+MODEL_BATCH_SIZE = 8      # Number of prompts to process in parallel on GPU
 DEFAULT_RESULTS_FILE = RESULTS_DIR / "pooled_results.json"
 
 # Create temp directory if it doesn't exist
@@ -94,15 +96,56 @@ class JudgeModel:
         
     def extract_score(self, response: str) -> int:
         """
-        Extract a relevance score from the model's response.
+        Extract relevance scores from the model's response.
         
         Args:
             response: Model's text response
             
         Returns:
-            Relevance score (1-4)
+            Dictionary with dimension scores and overall score, or single overall score for backward compatibility
         """
-        # Look for a number 1-4 in the response
+        # Look for the structured format with dimension scores
+        dimension_scores = {}
+        dimension_names = ["keyword relevance", "search intent alignment", "expected utility", "overall relevance"]
+        
+        # Find all dimension scores in the response
+        for dimension in dimension_names:
+            pattern = rf"{dimension}:?\s*(\d)"
+            match = re.search(pattern, response.lower())
+            if match:
+                try:
+                    score = int(match.group(1))
+                    if 1 <= score <= 4:
+                        dimension_scores[dimension] = score
+                except (ValueError, IndexError):
+                    continue
+        
+        # If we have an overall score, return it
+        if "overall relevance" in dimension_scores:
+            return dimension_scores["overall relevance"]
+        
+        # If we have at least one dimension score but no overall, calculate a weighted average
+        if dimension_scores:
+            # Use weights that emphasize query alignment and keyword relevance
+            weights = {
+                "keyword relevance": 0.3,
+                "search intent alignment": 0.4,
+                "expected utility": 0.3
+            }
+            
+            total_weight = 0
+            weighted_sum = 0
+            
+            for dim, score in dimension_scores.items():
+                if dim in weights:
+                    weighted_sum += score * weights[dim]
+                    total_weight += weights[dim]
+            
+            if total_weight > 0:
+                # Round to nearest integer
+                return round(weighted_sum / total_weight)
+        
+        # Fall back to the old approach if no structured scores found
         for line in response.split('\n'):
             line = line.strip()
             if line.startswith("Score:") or line.startswith("Relevance Score:"):
@@ -116,11 +159,11 @@ class JudgeModel:
                     
         # If no clear score, look for keywords
         lower_resp = response.lower()
-        if "highly relevant" in lower_resp or "very relevant" in lower_resp:
+        if "excellent" in lower_resp or "highly relevant" in lower_resp:
             return 4
-        elif "relevant" in lower_resp and "not relevant" not in lower_resp:
+        elif "good" in lower_resp or "relevant" in lower_resp:
             return 3
-        elif "marginally" in lower_resp or "somewhat" in lower_resp:
+        elif "fair" in lower_resp or "marginally" in lower_resp or "somewhat" in lower_resp:
             return 2
         else:
             return 1  # Default to not relevant
@@ -155,7 +198,8 @@ class GemmaJudge(JudgeModel):
             model=model,
             tokenizer=tokenizer,
             max_new_tokens=32,
-            do_sample=False
+            do_sample=False,
+            batch_size=MODEL_BATCH_SIZE  # Enable proper GPU batch processing
         )
         logging.info("Gemma model loaded successfully")
         
@@ -202,6 +246,8 @@ class GemmaJudge(JudgeModel):
             # Debug the structure of batch_responses
             try:
                 batch_outputs = self.pipe(formatted_prompts)
+                # Clear CUDA cache after batch processing to free GPU memory
+                torch.cuda.empty_cache()
                 end_time = time.time()
                 total_time = end_time - start_time
                 
@@ -255,6 +301,9 @@ class GemmaJudge(JudgeModel):
                         "response": f"Error: {error_msg}",
                         "processing_time": 0
                     })
+            
+            # Clear CUDA cache again at the end of the batch loop
+            torch.cuda.empty_cache()
         
         return results
 
@@ -274,12 +323,19 @@ class MistralJudge(JudgeModel):
             device_map={"": 0},  # Explicitly map to CUDA:0
         )
         
+        # Set pad_token_id to eos_token_id to fix batching issues
+        if tokenizer.pad_token is None:
+            logging.info("Setting Mistral tokenizer pad_token_id to eos_token_id")
+            tokenizer.pad_token = tokenizer.eos_token
+            tokenizer.pad_token_id = tokenizer.eos_token_id
+        
         self.pipe = pipeline(
             "text-generation",
             model=model,
             tokenizer=tokenizer,
             max_new_tokens=32,
-            do_sample=False
+            do_sample=False,
+            batch_size=MODEL_BATCH_SIZE  # Enable proper GPU batch processing
         )
         logging.info("Mistral model loaded successfully")
         
@@ -318,6 +374,8 @@ class MistralJudge(JudgeModel):
             # Debug the structure of batch_responses
             try:
                 batch_outputs = self.pipe(formatted_prompts)
+                # Clear CUDA cache after batch processing to free GPU memory
+                torch.cuda.empty_cache()
                 end_time = time.time()
                 total_time = end_time - start_time
                 
@@ -371,6 +429,134 @@ class MistralJudge(JudgeModel):
                         "response": f"Error: {error_msg}",
                         "processing_time": 0
                     })
+            
+            # Clear CUDA cache again at the end of the batch loop
+            torch.cuda.empty_cache()
+        
+        return results
+
+
+class Phi3Judge(JudgeModel):
+    """Judge model using Microsoft Phi-3-mini."""
+    
+    def load_model(self):
+        """Load the Phi-3 model and tokenizer."""
+        model_path = os.path.join(JUDGE_MODELS_DIR, "Phi-3-mini-4k-instruct")
+        logging.info(f"Loading Phi-3 model from {model_path}")
+        
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            torch_dtype=bfloat16,
+            device_map={"": 0},  # Explicitly map to CUDA:0
+        )
+        
+        self.pipe = pipeline(
+            "text-generation",
+            model=model,
+            tokenizer=tokenizer,
+            max_new_tokens=32,
+            do_sample=False,
+            batch_size=MODEL_BATCH_SIZE  # Enable proper GPU batch processing
+        )
+        logging.info("Phi-3 model loaded successfully")
+        
+    def evaluate(self, prompt: str) -> Dict[str, Any]:
+        """Evaluate using Phi-3 model."""
+        full_prompt = f"""<|user|>
+{prompt}
+<|assistant|>"""
+        
+        start_time = time.time()
+        response = self.pipe(full_prompt)[0]['generated_text']
+        # Extract only the model's response
+        response = response.split("<|assistant|>")[1].strip()
+        end_time = time.time()
+        
+        score = self.extract_score(response)
+        
+        return {
+            "model": "Phi-3-mini",
+            "score": score,
+            "response": response,
+            "processing_time": end_time - start_time
+        }
+        
+    def evaluate_batch(self, prompts: List[str], batch_size: int = DEFAULT_BATCH_SIZE) -> List[Dict[str, Any]]:
+        """Evaluate a batch of prompts using Phi-3 model."""
+        results = []
+        
+        # Process prompts in batches
+        for i in range(0, len(prompts), batch_size):
+            batch_prompts = prompts[i:i+batch_size]
+            formatted_prompts = [
+                f"""<|user|>
+{prompt}
+<|assistant|>"""
+                for prompt in batch_prompts
+            ]
+            
+            start_time = time.time()
+            try:
+                batch_outputs = self.pipe(formatted_prompts)
+                # Clear CUDA cache after batch processing to free GPU memory
+                torch.cuda.empty_cache()
+                end_time = time.time()
+                total_time = end_time - start_time
+                
+                # Process each response in the batch
+                for j, output in enumerate(batch_outputs):
+                    try:
+                        # Handle different output formats - could be a dict or a list with dict
+                        if isinstance(output, list) and len(output) > 0:
+                            response_text = output[0]['generated_text']
+                        else:
+                            response_text = output['generated_text']
+                            
+                        # Extract only the model's response
+                        response = response_text.split("<|assistant|>")[1].strip()
+                        
+                        score = self.extract_score(response)
+                        
+                        # Individual processing time is estimated
+                        per_item_time = total_time / len(batch_prompts)
+                        
+                        results.append({
+                            "model": "Phi-3-mini",
+                            "score": score,
+                            "response": response,
+                            "processing_time": per_item_time
+                        })
+                    except (IndexError, TypeError, KeyError) as e:
+                        error_msg = f"Error processing individual response {j} in batch {i//batch_size}: {e}"
+                        logging.error(error_msg)
+                        if hasattr(output, 'keys'):
+                            logging.error(f"Output keys: {list(output.keys())}")
+                        else:
+                            logging.error(f"Output type: {type(output)}")
+                        
+                        # Add a failed evaluation
+                        results.append({
+                            "model": "Phi-3-mini",
+                            "score": 0,
+                            "response": f"Error: {error_msg}",
+                            "processing_time": 0
+                        })
+            except Exception as e:
+                error_msg = f"Fatal error processing batch {i//batch_size}: {e}"
+                logging.error(error_msg)
+                
+                # Add failed evaluations for the entire batch
+                for _ in range(len(batch_prompts)):
+                    results.append({
+                        "model": "Phi-3-mini",
+                        "score": 0,
+                        "response": f"Error: {error_msg}",
+                        "processing_time": 0
+                    })
+            
+            # Clear CUDA cache again at the end of the batch loop
+            torch.cuda.empty_cache()
         
         return results
 
@@ -394,37 +580,36 @@ def format_evaluation_prompt(query_data: Dict[str, Any], result: Dict[str, Any])
     is_interdisciplinary = query_data.get('is_interdisciplinary', False)
     
     title = result.get('title', 'No title available')
-    abstract = result.get('abstract', 'No abstract available')
+    abstract = result.get('abstract', '')  # May be empty
+    paper_id = result.get('paper_id', 'Unknown')
+    rank = result.get('rank', 'Unknown')
+    score = result.get('score', 'Unknown')
+    year = result.get('year', '')  # May be empty
+    authors = result.get('authors', [])
+    author_text = ", ".join(authors) if authors else ""  # May be empty
     
-    # Comment out full text inclusion to speed up processing
-    """
-    # Check for full text in various possible field names
-    full_text = None
-    for field in ['fullText', 'body_text', 'full_text', 'text']:
-        if field in result and result[field] and result[field] is not None:
-            full_text = result[field]
-            break
+    # Build available metadata text conditionally
+    metadata_parts = []
+    if abstract:
+        metadata_parts.append(f"Abstract: {abstract}")
+    if author_text:
+        metadata_parts.append(f"Authors: {author_text}")
+    if year:
+        metadata_parts.append(f"Year: {year}")
     
-    # Format full text for inclusion (truncate if too long)
-    text_section = ""
-    if full_text:
-        # Truncate full text if it's very long (max 1000 chars)
-        if isinstance(full_text, str) and full_text.strip():
-            truncated_text = full_text[:1000] + "..." if len(full_text) > 1000 else full_text
-            text_section = f"\nFull Text (excerpt):\n{truncated_text}"
-    """
+    metadata_text = "\n".join(metadata_parts)
+    if metadata_text:
+        metadata_text = f"\n{metadata_text}"
     
-    # Set text_section to empty string since we're skipping full text
-    text_section = ""
-    
-    # Format prompt
-    prompt = f"""You are a judge evaluating the relevance of a search result for an academic search query.
+    # Format prompt for multi-dimensional evaluation with 3 dimensions
+    prompt = f"""You are a judge evaluating the relevance of an academic search result for a query.
 
 QUERY: "{query_text}"
 
 SEARCH RESULT:
-Title: {title}
-Abstract: {abstract}{text_section}
+Title: {title}{metadata_text}
+Original Rank: {rank}
+Engine Score: {score}
 
 ADDITIONAL CONTEXT:
 Topic: {topic_name}
@@ -432,13 +617,17 @@ Topic Keywords: {', '.join(topic_keywords)}
 Topic Representation: {topic_representation} ({representation_category} representation category)
 Interdisciplinary Topic: {'Yes' if is_interdisciplinary else 'No'}
 
-Please evaluate the relevance of this search result to the query on a scale of 1-4:
-1 = Not relevant - The document does not contain information related to the query
-2 = Marginally relevant - The document mentions query terms but lacks substantial information
-3 = Relevant - The document contains information related to the query but may not be comprehensive
-4 = Highly relevant - The document directly addresses the query topic with comprehensive information
+Rate this search result on three dimensions using scores of 1-4 (1=Poor, 2=Fair, 3=Good, 4=Excellent):
 
-Provide your relevance score and a brief explanation of your reasoning. Format your response starting with "Relevance Score: X" followed by your explanation.
+1. KEYWORD RELEVANCE: How well the title/abstract match the query keywords
+2. SEARCH INTENT ALIGNMENT: How well the document addresses the query's information need
+3. EXPECTED UTILITY: How useful this document would be to a researcher
+
+Provide ratings WITHOUT explanations in this exact format:
+Keyword Relevance: [SCORE]
+Search Intent Alignment: [SCORE]
+Expected Utility: [SCORE]
+Overall Relevance: [SCORE]
 """
     return prompt
 
@@ -608,6 +797,61 @@ def run_sequential_evaluation(results_file: Path, batch_size: int = DEFAULT_BATC
         # Unload Mistral model to free memory
         mistral_judge.unload_model()
     
+    # Process with Phi-3 next
+    phi3_judge = Phi3Judge(os.path.join(JUDGE_MODELS_DIR, "Phi-3-mini-4k-instruct"))
+    phi3_judge.load_model()
+    
+    # Process all evaluation tasks with Phi-3
+    try:
+        logging.info("Starting evaluations with Phi-3 model...")
+        phi3_results = {}
+        
+        # Process in batches
+        logging.info(f"Processing {len(all_prompts)} Phi-3 evaluations in batches of {batch_size}")
+        processed = 0
+        
+        for i in range(0, len(all_prompts), batch_size):
+            batch_prompts = all_prompts[i:i+batch_size]
+            batch_indices = task_indices[i:i+batch_size]
+            
+            batch_num = i//batch_size + 1
+            total_batches = (len(all_prompts) + batch_size - 1)//batch_size
+            logging.info(f"Starting Phi-3 batch {batch_num}/{total_batches} at {time.strftime('%H:%M:%S')}")
+            batch_start_time = time.time()
+            
+            try:
+                batch_results = phi3_judge.evaluate_batch(batch_prompts, batch_size)
+                batch_end_time = time.time()
+                batch_duration = batch_end_time - batch_start_time
+                
+                for j, evaluation in enumerate(batch_results):
+                    query_id, result_index = batch_indices[j]
+                    result_id = f"{query_id}_{result_index}"
+                    phi3_results[result_id] = evaluation
+                
+                # Update progress
+                processed += len(batch_prompts)
+                items_per_second = len(batch_prompts) / batch_duration if batch_duration > 0 else 0
+                remaining_batches = total_batches - batch_num
+                est_remaining_time = (remaining_batches * batch_duration) / 60  # minutes
+                
+                logging.info(f"Phi-3: Batch {batch_num} completed in {batch_duration:.2f}s ({items_per_second:.2f} items/sec)")
+                logging.info(f"Phi-3: Processed {processed}/{total_tasks} ({processed/total_tasks*100:.1f}%)")
+                logging.info(f"Phi-3: Est. remaining time: {est_remaining_time:.1f} minutes")
+                
+            except Exception as e:
+                logging.error(f"Error evaluating batch {batch_num}/{total_batches} with Phi-3: {e}")
+        
+        # Save Phi-3 results to temp file
+        with open(TEMP_DIR / "phi3_results.json", 'w') as f:
+            json.dump(phi3_results, f)
+            
+        logging.info("Completed Phi-3 evaluations")
+        model_results["phi3"] = phi3_results
+    finally:
+        # Unload Phi-3 model to free memory
+        phi3_judge.unload_model()
+    
     # Combine results from both models
     for query_id, query_data in test_queries.items():
         if query_id not in search_results:
@@ -623,27 +867,33 @@ def run_sequential_evaluation(results_file: Path, batch_size: int = DEFAULT_BATC
         for result_index, result in enumerate(engine_results):
             result_id = f"{query_id}_{result_index}"
             
-            # Get evaluations from both models if available
+            # Get evaluations from both models
             gemma_eval = model_results.get("gemma", {}).get(result_id, {})
             mistral_eval = model_results.get("mistral", {}).get(result_id, {})
+            phi3_eval = model_results.get("phi3", {}).get(result_id, {})
             
             # Calculate blended score
             gemma_score = gemma_eval.get('score', 0)
             mistral_score = mistral_eval.get('score', 0)
+            phi3_score = phi3_eval.get('score', 0)
             
-            # If one model failed, use the other's score; otherwise take average
-            if gemma_score == 0:
-                blended_score = mistral_score
-            elif mistral_score == 0:
-                blended_score = gemma_score
-            else:
-                blended_score = (gemma_score + mistral_score) / 2
+            # If models failed, use the available scores; otherwise take average
+            valid_scores = []
+            if gemma_score > 0:
+                valid_scores.append(gemma_score)
+            if mistral_score > 0:
+                valid_scores.append(mistral_score)
+            if phi3_score > 0:
+                valid_scores.append(phi3_score)
+            
+            blended_score = sum(valid_scores) / len(valid_scores) if valid_scores else 0
             
             evaluation_entry = {
                 'result_index': result_index,
                 'title': result.get('title', 'No title'),
                 'gemma_evaluation': gemma_eval,
                 'mistral_evaluation': mistral_eval,
+                'phi3_evaluation': phi3_eval,
                 'blended_score': blended_score
             }
             
@@ -665,7 +915,12 @@ def create_evaluation_summary(evaluations: Dict[str, Any], output_file: Path) ->
         'file': evaluations['file'],
         'timestamp': evaluations['timestamp'],
         'system_name': evaluations['system_name'],
-        'query_summaries': {}
+        'query_summaries': {},
+        'dimension_stats': {
+            'keyword_relevance': {'sum': 0, 'count': 0},
+            'search_intent_alignment': {'sum': 0, 'count': 0},
+            'expected_utility': {'sum': 0, 'count': 0}
+        }
     }
     
     # Initialize counters
@@ -687,6 +942,14 @@ def create_evaluation_summary(evaluations: Dict[str, Any], output_file: Path) ->
         
         # Count scores by range
         query_distribution = {1: 0, 2: 0, 3: 0, 4: 0}
+        
+        # Initialize dimension sums for this query
+        query_dimension_stats = {
+            'keyword_relevance': {'sum': 0, 'count': 0},
+            'search_intent_alignment': {'sum': 0, 'count': 0},
+            'expected_utility': {'sum': 0, 'count': 0}
+        }
+        
         for result in query_results:
             score = result['blended_score']
             rounded_score = round(score)
@@ -694,13 +957,49 @@ def create_evaluation_summary(evaluations: Dict[str, Any], output_file: Path) ->
                 query_distribution[rounded_score] += 1
                 score_distributions[rounded_score] += 1
             
+            # Extract dimension scores if available from Gemma and Mistral evaluations
+            for model_name in ['gemma_evaluation', 'mistral_evaluation', 'phi3_evaluation']:
+                if model_name in result:
+                    model_eval = result[model_name]
+                    response = model_eval.get('response', '')
+                    
+                    # Check for dimension scores in the response
+                    dimensions = [
+                        ('keyword_relevance', r"keyword relevance:?\s*(\d)"),
+                        ('search_intent_alignment', r"search intent alignment:?\s*(\d)"),
+                        ('expected_utility', r"expected utility:?\s*(\d)")
+                    ]
+                    
+                    for dim_name, pattern in dimensions:
+                        match = re.search(pattern, response.lower())
+                        if match:
+                            try:
+                                dim_score = int(match.group(1))
+                                if 1 <= dim_score <= 4:
+                                    # Add to query stats
+                                    query_dimension_stats[dim_name]['sum'] += dim_score
+                                    query_dimension_stats[dim_name]['count'] += 1
+                                    
+                                    # Add to overall stats
+                                    summary['dimension_stats'][dim_name]['sum'] += dim_score
+                                    summary['dimension_stats'][dim_name]['count'] += 1
+                            except (ValueError, IndexError):
+                                continue
+        
+        # Calculate dimension averages for this query
+        query_dimension_averages = {}
+        for dim_name, stats in query_dimension_stats.items():
+            if stats['count'] > 0:
+                query_dimension_averages[dim_name] = stats['sum'] / stats['count']
+        
         # Update summary for this query
         summary['query_summaries'][query_id] = {
             'query': query_eval['query'],
             'topic_name': query_eval['topic_name'],
             'result_count': query_total,
             'average_score': query_avg,
-            'score_distribution': query_distribution
+            'score_distribution': query_distribution,
+            'dimension_averages': query_dimension_averages
         }
         
         # Update totals
@@ -710,12 +1009,19 @@ def create_evaluation_summary(evaluations: Dict[str, Any], output_file: Path) ->
     # Calculate overall average
     overall_avg = score_sum / total_results if total_results > 0 else 0
     
+    # Calculate dimension averages across all queries
+    dimension_averages = {}
+    for dim_name, stats in summary['dimension_stats'].items():
+        if stats['count'] > 0:
+            dimension_averages[dim_name] = stats['sum'] / stats['count']
+    
     # Add overall summary
     summary['overall'] = {
         'total_queries': len(summary['query_summaries']),
         'total_results': total_results,
         'average_score': overall_avg,
-        'score_distribution': score_distributions
+        'score_distribution': score_distributions,
+        'dimension_averages': dimension_averages
     }
     
     # Save summary
