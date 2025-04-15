@@ -97,7 +97,7 @@ class BertEnhancedIndexer(FieldWeightedLSIIndexer):
             combined_texts.append(f"{title} {abstract}".strip())
         
         # Process documents in batches
-        batch_size = 32  # Adjust based on available VRAM
+        batch_size = 96  # Adjust based on available VRAM
         keywords_list = []
         
         for i in tqdm(range(0, len(combined_texts), batch_size), desc="Extracting keywords"):

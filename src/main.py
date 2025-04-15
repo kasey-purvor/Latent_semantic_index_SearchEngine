@@ -8,6 +8,7 @@ import sys
 import argparse
 import logging
 from typing import List, Dict, Any, Optional
+import os.path as op
 
 # Change from absolute to relative imports
 from indexing import (
@@ -15,6 +16,7 @@ from indexing import (
     extract_fields,
     BaseIndexer
 )
+from indexing.bm25 import BM25Indexer
 from search.query_processor import QueryProcessor
 from faiss_bert_reranking import BertFaissReranker
 
@@ -24,10 +26,12 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-# Default paths for data and models
-DEFAULT_DATA_DIR = "../data/irCOREdata"
-DEFAULT_MODEL_DIR = "../data/processed_data"
-DEFAULT_OUTPUT_DIR = "../data/processed_data"
+# New path construction using script location for absolute paths
+SCRIPT_DIR = op.dirname(op.abspath(__file__))
+PROJECT_ROOT = op.dirname(SCRIPT_DIR)
+DEFAULT_DATA_DIR = op.join(PROJECT_ROOT, "data", "irCOREdata")
+DEFAULT_MODEL_DIR = op.join(PROJECT_ROOT, "data", "processed_data")
+DEFAULT_OUTPUT_DIR = op.join(PROJECT_ROOT, "data", "processed_data")
 
 # Available index types
 INDEX_TYPES = {
@@ -62,6 +66,11 @@ def setup_argparse() -> argparse.ArgumentParser:
     index_parser.add_argument('--index-type', choices=list(INDEX_TYPES.keys()), 
                             default='lsi_field_weighted', help='Type of index to build')
     
+    # Add a command for downloading the BERT model for reranking
+    bert_parser = subparsers.add_parser('download-bert-model', 
+                                          help='Download and cache BERT model for search result reranking')
+    bert_parser.add_argument('--bert-model', default="C-KAI/sbert-academic-group44", help='BERT model to use for reranking')
+    
     # Search command
     search_parser = subparsers.add_parser('search', help='Search for documents')
     search_parser.add_argument('--model-dir', default=DEFAULT_MODEL_DIR, help='Directory containing model files')
@@ -72,9 +81,9 @@ def setup_argparse() -> argparse.ArgumentParser:
     search_parser.add_argument('--query', help='Search query (if not provided, interactive mode is used)')
     search_parser.add_argument('--index-type', choices=list(INDEX_TYPES.keys()), 
                             default='lsi_field_weighted', help='Type of index to use for search')
-    search_parser.add_argument('--use-bert-reranking', action='store_true', 
-                            help='Enable BERT-FAISS reranking for search results')
-    search_parser.add_argument('--reranking-top-k', type=int, default=5, 
+    search_parser.add_argument('--disable-bert-reranking', action='store_true', 
+                            help='Disable BERT-FAISS reranking for search results (enabled by default)')
+    search_parser.add_argument('--reranking-top-k', type=int, default=10, 
                             help='Number of results to return after BERT reranking')
     
     return parser
@@ -131,19 +140,6 @@ def handle_index_command(args: argparse.Namespace) -> None:
     indexer.build_index(extracted_data, index_dir)
     
     logging.info(f"Indexing complete. Model saved to {index_dir}")
-    
-    # If BERT reranking is enabled, prepare the BERT model and FAISS index
-    if hasattr(args, 'use_bert_reranking') and args.use_bert_reranking:
-        logging.info("Building BERT-FAISS index for reranking")
-        
-        # Ensure papers have paper_id for consistent matching with search results
-        for paper in papers:
-            if 'coreId' in paper and 'paper_id' not in paper:
-                paper['paper_id'] = paper['coreId']
-                
-        bert_reranker = BertFaissReranker(model_name="C-KAI/sbert-academic-group44")
-        bert_reranker.initialize()
-        bert_reranker.build_index(papers, force_rebuild=True)
 
 def handle_search_command(args: argparse.Namespace) -> None:
     """
@@ -162,12 +158,29 @@ def handle_search_command(args: argparse.Namespace) -> None:
     if not hasattr(args, 'top_n'):
         args.top_n = 50
     
-    # Initialize BERT reranker if enabled
+    # For BM25, always use binary method
+    if args.index_type == 'bm25':
+        args.method = 'binary'
+        # Always disable BERT reranking for BM25
+        args.disable_bert_reranking = True
+        logging.info("Using binary query method for BM25 (only supported method)")
+        logging.info("BERT reranking disabled for BM25 baseline")
+    
+    # Initialize BERT reranker by default unless explicitly disabled
     bert_reranker = None
-    if hasattr(args, 'use_bert_reranking') and args.use_bert_reranking:
-        logging.info("Initializing BERT-FAISS reranker")
+    disable_bert_reranking = hasattr(args, 'disable_bert_reranking') and args.disable_bert_reranking
+    
+    if not disable_bert_reranking:
+        logging.info("Initializing BERT reranker")
         bert_reranker = BertFaissReranker(model_name="C-KAI/sbert-academic-group44")
-        bert_reranker.initialize()
+        try:
+            bert_reranker.initialize()
+        except Exception as e:
+            logging.error(f"Failed to initialize BERT reranker: {e}")
+            print(f"\nERROR: Failed to initialize BERT reranker: {e}")
+            print("Please make sure you have the sentence-transformers package installed.")
+            print("Continuing without BERT reranking.")
+            bert_reranker = None
         
     # Load the appropriate indexer. 
     if args.index_type == 'bm25':
@@ -188,7 +201,13 @@ def handle_search_command(args: argparse.Namespace) -> None:
     # Load the index
     index_dir = os.path.join(args.model_dir, args.index_type)
     logging.info(f"Loading {args.index_type} index from {index_dir}")
-    indexer.load_index(index_dir)
+    try:
+        indexer.load_index(index_dir)
+    except Exception as e:
+        logging.error(f"Failed to load index: {e}")
+        print(f"\nERROR: Failed to load {args.index_type} index: {e}")
+        print(f"Please build the index first with: python src/main.py index --index-type {args.index_type}")
+        return
     
     # Load original papers data if available (for result expansion)
     papers_data = []
@@ -199,10 +218,10 @@ def handle_search_command(args: argparse.Namespace) -> None:
     # Interactive or single query mode
     if args.query:
         # Single query mode
-        process_query(indexer, args.query, args.method, args.top_n, papers_data, bert_reranker, args.reranking_top_k if hasattr(args, 'reranking_top_k') else 5)
+        process_query(indexer, args.query, args.method, args.top_n, papers_data, bert_reranker, args.reranking_top_k if hasattr(args, 'reranking_top_k') else 10)
     else:
         # Interactive mode
-        interactive_search(indexer, args.method, args.top_n, papers_data, bert_reranker, args.reranking_top_k if hasattr(args, 'reranking_top_k') else 5)
+        interactive_search(indexer, args.method, args.top_n, papers_data, bert_reranker, args.reranking_top_k if hasattr(args, 'reranking_top_k') else 10)
 
 def process_query(
     indexer: BaseIndexer, 
@@ -211,7 +230,7 @@ def process_query(
     top_n: int,
     papers_data: List[Dict[str, Any]],
     bert_reranker: Optional[BertFaissReranker] = None,
-    reranking_top_k: int = 5
+    reranking_top_k: int = 10
 ) -> None:
     """
     Process a single search query
@@ -227,17 +246,38 @@ def process_query(
     """
     # Search for documents
     results = indexer.search(query, top_k=top_n)
+    logging.info(f"Search returned {len(results)} results initially")
     
-    # Apply BERT reranking if enabled
-    if bert_reranker is not None:
+    # Ensure all search results have string paper_id for consistent matching
+    for result in results:
+        if 'paper_id' in result and result['paper_id'] is not None:
+            result['paper_id'] = str(result['paper_id'])
+    
+    # Skip BERT reranking for BM25 as it should remain a pure baseline
+    is_bm25 = isinstance(indexer, BM25Indexer)
+    
+    # Apply BERT reranking if enabled and not BM25
+    if bert_reranker is not None and not is_bm25:
         logging.info("Applying BERT-FAISS reranking to search results")
         results = bert_reranker.rerank(query, results, top_k=reranking_top_k)
         logging.info(f"Reranking complete. Returning top {reranking_top_k} results.")
+    elif is_bm25:
+        logging.info("Skipping BERT-FAISS reranking for BM25 baseline")
+        # For BM25, only display the top results to match reranked count
+        if len(results) > reranking_top_k:
+            logging.info(f"BM25 found {len(results)} results, limiting to top {reranking_top_k}")
+            results = results[:reranking_top_k]
+            logging.info(f"Limiting BM25 results to top {reranking_top_k} for consistent display")
     
     # Display results
     print(f"\nSearch results for: '{query}' using {method} method")
-    if bert_reranker is not None:
+    if bert_reranker is not None and not is_bm25:
         print(f"Results reranked using BERT-FAISS")
+    elif is_bm25:
+        if len(results) < top_n:
+            print(f"Results from BM25 baseline (found {len(results)} documents containing query terms)")
+        else:
+            print(f"Results from BM25 baseline (top {min(len(results), reranking_top_k)} of {top_n} retrieved)")
     print(f"Found {len(results)} results")
     
     for i, result in enumerate(results):
@@ -270,10 +310,10 @@ def interactive_search(
     top_n: int,
     papers_data: List[Dict[str, Any]],
     bert_reranker: Optional[BertFaissReranker] = None,
-    reranking_top_k: int = 5
+    reranking_top_k: int = 10
 ) -> None:
     """
-    Run an interactive search loop
+    Run interactive search loop
     
     Args:
         indexer: Initialized indexer instance
@@ -283,28 +323,38 @@ def interactive_search(
         bert_reranker: Optional BERT-FAISS reranker for reranking results
         reranking_top_k: Number of results to return after reranking
     """
+    is_bm25 = isinstance(indexer, BM25Indexer)
+    
     print(f"\nLatent Semantic Search Engine - Interactive Mode")
-    print(f"Using {method} query representation method")
+    
+    if is_bm25:
+        print(f"Using BM25 baseline with binary query representation")
+    else:
+        print(f"Using {method} query representation method")
+        
     print(f"Type 'quit' or 'exit' to end the session")
-    print(f"Type 'method binary|tfidf|log_entropy' to change query method")
+    
+    if not is_bm25:
+        print(f"Type 'method binary|tfidf|log_entropy' to change query method")
+        
     print(f"Type 'top N' to change number of results (e.g., 'top 5')")
-    if bert_reranker is not None:
+    
+    if is_bm25:
+        print(f"BERT-FAISS reranking is disabled for BM25 baseline")
+    elif bert_reranker is not None:
         print(f"BERT-FAISS reranking is enabled (returning top {reranking_top_k} results)")
-        print(f"Type 'rerank on|off' to enable/disable BERT reranking")
+        print(f"Type 'rerank off' to disable BERT reranking")
         print(f"Type 'rerank N' to change the number of reranked results")
     else:
         print(f"BERT-FAISS reranking is disabled")
-        print(f"Type 'rerank on' to enable BERT reranking")
+        print(f"Note: BERT reranking is enabled by default, but failed to initialize")
+        print(f"Please ensure you have installed the required packages and run 'download-bert-model'")
     print()
     
     current_method = method
     current_top_n = top_n
-    use_reranker = bert_reranker is not None
+    use_reranker = bert_reranker is not None and not is_bm25
     current_reranking_top_k = reranking_top_k
-    
-    # Initialize reranker if needed but not already initialized
-    if use_reranker and bert_reranker.model is None:
-        bert_reranker.initialize()
     
     while True:
         # Get query from user
@@ -326,12 +376,15 @@ def interactive_search(
             
         # Check for method change
         if user_input.startswith('method '):
-            method_name = user_input[7:].strip().lower()
-            if method_name in ['binary', 'tfidf', 'log_entropy']:
-                current_method = method_name
-                print(f"Query method changed to {current_method}")
+            if is_bm25:
+                print("Cannot change query method for BM25 - it only supports binary representation")
             else:
-                print(f"Unknown method: {method_name}. Valid methods: binary, tfidf, log_entropy")
+                method_name = user_input[7:].strip().lower()
+                if method_name in ['binary', 'tfidf', 'log_entropy']:
+                    current_method = method_name
+                    print(f"Query method changed to {current_method}")
+                else:
+                    print(f"Unknown method: {method_name}. Valid methods: binary, tfidf, log_entropy")
             continue
                 
         # Check for top_n change
@@ -349,42 +402,32 @@ def interactive_search(
         
         # Check for rerank command
         if user_input.startswith('rerank '):
-            cmd = user_input[7:].strip().lower()
-            
-            if cmd == 'on':
-                if bert_reranker is None:
-                    # Initialize reranker if it doesn't exist
-                    print("Initializing BERT-FAISS reranker...")
-                    bert_reranker = BertFaissReranker()
-                    bert_reranker.initialize()
-                    
-                    # Build the BERT index with papers data, forcing a rebuild
-                    if papers_data:
-                        print("Building BERT-FAISS index (this may take some time)...")
-                        
-                        # Ensure papers have paper_id for consistent matching with search results
-                        for paper in papers_data:
-                            if 'coreId' in paper and 'paper_id' not in paper:
-                                paper['paper_id'] = paper['coreId']
-                                
-                        bert_reranker.build_index(papers_data, force_rebuild=True)
-                    else:
-                        print("Warning: No papers data available for building BERT index")
-                use_reranker = True
-                print(f"BERT reranking enabled (top {current_reranking_top_k} results)")
-            elif cmd == 'off':
-                use_reranker = False
-                print("BERT reranking disabled")
+            if is_bm25:
+                print("BERT reranking is disabled for BM25 baseline and cannot be enabled")
             else:
-                try:
-                    new_k = int(cmd)
-                    if new_k > 0:
-                        current_reranking_top_k = new_k
-                        print(f"Number of reranked results changed to {current_reranking_top_k}")
+                cmd = user_input[7:].strip().lower()
+                
+                if cmd == 'on':
+                    if bert_reranker is None:
+                        print("ERROR: BERT-FAISS reranker is not initialized.")
+                        print("Please restart with the --disable-bert-reranking flag and ensure")
+                        print("the BERT-FAISS index is built using the 'download-bert-model' command.")
                     else:
-                        print("Number of results must be positive")
-                except ValueError:
-                    print(f"Unknown rerank command: {cmd}. Valid commands: on, off, or a number")
+                        use_reranker = True
+                        print(f"BERT reranking enabled (top {current_reranking_top_k} results)")
+                elif cmd == 'off':
+                    use_reranker = False
+                    print("BERT reranking disabled")
+                else:
+                    try:
+                        new_k = int(cmd)
+                        if new_k > 0:
+                            current_reranking_top_k = new_k
+                            print(f"Number of reranked results changed to {current_reranking_top_k}")
+                        else:
+                            print("Number of results must be positive")
+                    except ValueError:
+                        print(f"Unknown rerank command: {cmd}. Valid commands: on, off, or a number")
             continue
                 
         # Process search query
@@ -397,6 +440,42 @@ def interactive_search(
             bert_reranker if use_reranker else None,
             current_reranking_top_k
         )
+
+def download_bert_model(papers: List[Dict[str, Any]] = None, limit: Optional[int] = None, 
+                              model_name: str = "C-KAI/sbert-academic-group44", 
+                              force_rebuild: bool = False) -> None:
+    """
+    Download and cache the BERT model for later use in search result reranking.
+    This function doesn't build a traditional index - it just downloads and saves the model.
+    
+    Args:
+        papers: List of paper documents (not used in this implementation)
+        limit: Optional limit on number of papers to process (not used)
+        model_name: Name of the BERT model to use
+        force_rebuild: If True, force redownload of the model
+    """
+    logging.info(f"Downloading and caching BERT model '{model_name}' for reranking")
+    print(f"\nDownloading and caching BERT model '{model_name}'...")
+    print("This will be used for semantic reranking of search results.")
+    
+    # Initialize the BERT reranker
+    bert_reranker = BertFaissReranker(model_name=model_name)
+    bert_reranker.initialize()
+    logging.info("BERT model downloaded and cached successfully")
+    print("BERT model downloaded and cached successfully.")
+    print("You can now use the --disable-bert-reranking flag with the search command.")
+
+def handle_download_bert_model(args: argparse.Namespace) -> None:
+    """
+    Handle the 'download-bert-model' command
+    
+    Args:
+        args: Command-line arguments
+    """
+    # Download the BERT model
+    download_bert_model(
+        model_name=args.bert_model if hasattr(args, 'bert_model') else "C-KAI/sbert-academic-group44"
+    )
 
 def prompt_for_command() -> argparse.Namespace:
     """
@@ -411,7 +490,8 @@ def prompt_for_command() -> argparse.Namespace:
     print("Please select a command:")
     print("1. index - Build search index from documents")
     print("2. search - Search for documents")
-    choice = input("\nEnter your choice (1/2): ").strip()
+    print("3. download-bert-model - Download and cache BERT model for search result reranking")
+    choice = input("\nEnter your choice (1/2/3): ").strip()
     
     # Create a minimal set of arguments
     args = argparse.Namespace()
@@ -456,14 +536,9 @@ def prompt_for_command() -> argparse.Namespace:
         # Set use_keybert based on index type
         args.use_keybert = (args.index_type == 'lsi_bert_enhanced')
         
-        # Ask if user wants to build BERT-FAISS index for reranking
-        bert_reranking = input("\nBuild BERT-FAISS index for reranking? (y/n, default: n): ").strip().lower()
-        args.use_bert_reranking = bert_reranking == 'y'
-        
-        if args.use_bert_reranking:
-            # Always use the default model
-            args.bert_model = "C-KAI/sbert-academic-group44"
-            print(f"Using BERT model: {args.bert_model}")
+        # The BERT reranking model is now initialized separately, so we don't need to ask here
+        # Setting this to False to avoid redundancy
+        args.build_bert_reranking_index = False
             
     elif choice == '2':
         # Search command
@@ -488,62 +563,90 @@ def prompt_for_command() -> argparse.Namespace:
             print("Invalid input. Using default: lsi_field_weighted")
             args.index_type = 'lsi_field_weighted'
         
-        # Ask about query representation method
-        print("\nQuery representation methods:")
-        print("1. binary - Simple term presence/absence")
-        print("2. tfidf - Term frequency-inverse document frequency")
-        print("3. log_entropy - Log entropy weighting")
-        method_choice = input("Select query method (1-3, default: 1): ").strip()
-        try:
-            method_choice = int(method_choice)
-            if method_choice == 1:
-                args.method = 'binary'
-            elif method_choice == 2:
-                args.method = 'tfidf'
-            elif method_choice == 3:
-                args.method = 'log_entropy'
-            else:
-                print("Invalid choice. Using default: binary")
-                args.method = 'binary'
-        except ValueError:
-            print("Invalid input. Using default: binary")
+        # For BM25, always use binary method and disable BERT reranking
+        if args.index_type == 'bm25':
             args.method = 'binary'
-        
-        # Ask about number of results
-        top_n_input = input("\nEnter number of results to return (default: 50): ").strip()
-        if top_n_input:
+            args.disable_bert_reranking = True
+            # Set standard number of results for BM25
+            args.top_n = 50
+            args.reranking_top_k = 10
+            print("\nUsing binary query method for BM25 (only supported method)")
+            print("BERT-FAISS reranking disabled for BM25 baseline")
+            print(f"Using standard retrieval of 50 documents, displaying top 10 results")
+        else:
+            # Ask about query representation method (only for non-BM25 indexes)
+            print("\nQuery representation methods:")
+            print("1. binary - Simple term presence/absence")
+            print("2. tfidf - Term frequency-inverse document frequency")
+            print("3. log_entropy - Log entropy weighting")
+            method_choice = input("Select query method (1-3, default: 1): ").strip()
             try:
-                args.top_n = int(top_n_input)
-                if args.top_n <= 0:
-                    print("Number must be positive. Using default: 50")
-                    args.top_n = 50
+                method_choice = int(method_choice)
+                if method_choice == 1:
+                    args.method = 'binary'
+                elif method_choice == 2:
+                    args.method = 'tfidf'
+                elif method_choice == 3:
+                    args.method = 'log_entropy'
+                else:
+                    print("Invalid choice. Using default: binary")
+                    args.method = 'binary'
             except ValueError:
-                print("Invalid input. Using default: 50")
-                args.top_n = 50
+                print("Invalid input. Using default: binary")
+                args.method = 'binary'
         
-        # Ask about BERT reranking
-        bert_reranking = input("\nEnable BERT-FAISS reranking? (y/n, default: n): ").strip().lower()
-        args.use_bert_reranking = bert_reranking == 'y'
-        
-        if args.use_bert_reranking:
-            # Always use the default model
-            args.bert_model = "C-KAI/sbert-academic-group44"
-            print(f"Using BERT model: {args.bert_model}")
-            
-            # Ask about reranking result limit
-            rerank_top_k_input = input("Enter number of results after reranking (default: 5): ").strip()
-            if rerank_top_k_input:
+            # Ask about number of results (only for non-BM25)
+            top_n_input = input("\nEnter number of results to return (default: 50): ").strip()
+            if top_n_input:
                 try:
-                    args.reranking_top_k = int(rerank_top_k_input)
-                    if args.reranking_top_k <= 0:
-                        print("Number must be positive. Using default: 5")
-                        args.reranking_top_k = 5
+                    args.top_n = int(top_n_input)
+                    if args.top_n <= 0:
+                        print("Number must be positive. Using default: 50")
+                        args.top_n = 50
                 except ValueError:
-                    print("Invalid input. Using default: 5")
-                    args.reranking_top_k = 5
-            else:
-                args.reranking_top_k = 5
+                    print("Invalid input. Using default: 50")
+                    args.top_n = 50
             
+            # Ask about BERT reranking only for non-BM25 indexes
+            bert_reranking = input("\nDisable BERT-FAISS reranking? (y/n, default: n): ").strip().lower()
+            args.disable_bert_reranking = bert_reranking == 'y'
+            
+            if not args.disable_bert_reranking:
+                # Always use the default model
+                args.bert_model = "C-KAI/sbert-academic-group44"
+                print(f"Using BERT model: {args.bert_model}")
+                
+                # Ask about reranking result limit
+                rerank_top_k_input = input("Enter number of results after reranking (default: 10): ").strip()
+                if rerank_top_k_input:
+                    try:
+                        args.reranking_top_k = int(rerank_top_k_input)
+                        if args.reranking_top_k <= 0:
+                            print("Number must be positive. Using default: 10")
+                            args.reranking_top_k = 10
+                    except ValueError:
+                        print("Invalid input. Using default: 10")
+                        args.reranking_top_k = 10
+                else:
+                    args.reranking_top_k = 10
+    elif choice == '3':
+        # Download BERT model command
+        args.command = 'download-bert-model'
+        args.limit = None
+        args.force_rebuild = False
+        args.bert_model = "C-KAI/sbert-academic-group44"
+        
+        # Ask if user wants to force rebuild
+        force_rebuild = input("\nForce re-download of BERT model? (y/n, default: n): ").strip().lower()
+        args.force_rebuild = force_rebuild == 'y'
+        
+        # Custom model option
+        custom_model = input("\nUse custom BERT model? (Leave empty for default 'C-KAI/sbert-academic-group44'): ").strip()
+        if custom_model:
+            args.bert_model = custom_model
+            print(f"Using custom BERT model: {args.bert_model}")
+        else:
+            print(f"Using default BERT model: {args.bert_model}")
     else:
         print("Invalid choice. Exiting.")
         sys.exit(1)
@@ -551,19 +654,35 @@ def prompt_for_command() -> argparse.Namespace:
     return args
 
 def main() -> None:
-    """Main entry point"""
-    parser = setup_argparse()
-    args = parser.parse_args()
-    
-    if not args.command:
-        args = prompt_for_command()
-    
-    if args.command == 'index':
-        handle_index_command(args)
-    elif args.command == 'search':
-        handle_search_command(args)
+    """
+    Main application entry point
+    """
+    # Process command-line arguments
+    if len(sys.argv) > 1:
+        # Command-line mode
+        parser = setup_argparse()
+        args = parser.parse_args()
+        
+        if args.command == 'index':
+            handle_index_command(args)
+        elif args.command == 'search':
+            handle_search_command(args)
+        elif args.command == 'download-bert-model':
+            handle_download_bert_model(args)
+        else:
+            parser.print_help()
     else:
-        parser.print_help()
+        # Interactive mode
+        args = prompt_for_command()
+        
+        if args.command == 'index':
+            handle_index_command(args)
+        elif args.command == 'search':
+            handle_search_command(args)
+        elif args.command == 'download-bert-model':
+            handle_download_bert_model(args)
+        else:
+            print("Invalid command. Exiting.")
 
 if __name__ == '__main__':
     main() 

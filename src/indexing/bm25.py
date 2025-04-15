@@ -205,14 +205,14 @@ class BM25Indexer(BaseIndexer):
         
         results = []
         for i, idx in enumerate(top_indices):
-            if scores[idx] > 0:
-                result = {
-                    'score': float(scores[idx]),
-                    'paper_id': self._doc_info[idx]['paper_id'],
-                    'title': self._doc_info[idx]['title'],
-                    'abstract': self._doc_info[idx]['abstract'],
-                    'rank': i + 1
-                }
-                results.append(result)
+            # Always include all results regardless of score
+            result = {
+                'score': float(scores[idx]),
+                'paper_id': self._doc_info[idx]['paper_id'],
+                'title': self._doc_info[idx]['title'],
+                'abstract': self._doc_info[idx]['abstract'],
+                'rank': i + 1
+            }
+            results.append(result)
         
         return results 

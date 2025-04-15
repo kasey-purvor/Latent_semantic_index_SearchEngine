@@ -17,7 +17,7 @@ evaluation/judgeblender/**
 evaluation/results/*
 evaluation/evaluations/*
 evaluation/temp/*
-src/faiss_bert_reranking/*
+# src/faiss_bert_reranking/*
 
 
 # Ignore other common large files

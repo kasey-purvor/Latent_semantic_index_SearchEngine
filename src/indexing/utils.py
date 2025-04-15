@@ -22,15 +22,24 @@ def load_papers(directory_path: str, limit: Optional[int] = None) -> List[Dict[s
     papers = []
     logging.info(f"Loading papers from {directory_path}")
     
-    counter = 0
+    # First, count total JSON files to process for the progress bar
+    total_files = 0
     for root, _, files in os.walk(directory_path):
-        for file in files:
-            if limit and counter >= limit:
-                break
-                
-            if file.endswith('.json'):
+        total_files += sum(1 for file in files if file.endswith('.json'))
+        if limit and total_files >= limit:
+            total_files = limit
+            break
+    
+    # Create a progress bar
+    counter = 0
+    with tqdm(total=total_files, desc="Loading papers", unit="files") as pbar:
+        for root, _, files in os.walk(directory_path):
+            json_files = [f for f in files if f.endswith('.json')]
+            for file in json_files:
+                if limit and counter >= limit:
+                    break
+                    
                 counter += 1
-                print(f"\rProcessing: {counter}", end='', flush=True)
                 file_path = os.path.join(root, file)
                 try:
                     with open(file_path, 'r', encoding='utf-8') as f:
@@ -39,19 +48,13 @@ def load_papers(directory_path: str, limit: Optional[int] = None) -> List[Dict[s
                     # Add file path information for reference
                     paper_data['file_path'] = file_path
                     papers.append(paper_data)
-                    
-                    # Log ID fields for the first few papers
-                    if counter <= 3:
-                        id_fields = [field for field in ['id', 'coreId', 'paperId', 'documentId'] if field in paper_data]
-                        logging.info(f"Paper {counter} has ID fields: {id_fields}")
-                        for field in id_fields:
-                            logging.info(f"  {field}: {paper_data.get(field)}")
-                                        
                 except Exception as e:  
                     logging.error(f"Error loading {file_path}: {e}")
-        
-        if limit and counter >= limit:
-            break
+                
+                pbar.update(1)
+            
+            if limit and counter >= limit:
+                break
             
     logging.info(f"Finished loading {counter} papers")
     return papers
@@ -75,7 +78,6 @@ def extract_fields(papers: List[Dict[str, Any]]) -> Dict[str, List]:
     
     for paper in papers:
         counter += 1
-        print(f"\rProcessing: {counter}", end='', flush=True)
         
         # Extract ID
         paper_id = paper.get('coreId')
