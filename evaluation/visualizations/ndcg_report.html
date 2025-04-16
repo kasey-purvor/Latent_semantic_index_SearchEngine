@@ -1,0 +1,94 @@
+
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>NDCG Evaluation Results</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            h1, h2, h3 { color: #2c3e50; }
+            table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+            th, td { text-align: left; padding: 8px; }
+            th { background-color: #3498db; color: white; }
+            tr:nth-child(even) { background-color: #f2f2f2; }
+            .plot { margin: 20px 0; text-align: center; }
+            .plot img { max-width: 100%; height: auto; border: 1px solid #ddd; }
+            .summary { background-color: #eef; padding: 15px; border-radius: 5px; }
+        </style>
+    </head>
+    <body>
+        <h1>NDCG Evaluation Results</h1>
+        
+        <div class="summary">
+            <h2>Summary</h2>
+            <p>This report shows the performance comparison of different search engine variants based on NDCG@10 metrics.</p>
+        </div>
+        
+        <h2>Overall System Performance</h2>
+        <table>
+            <tr>
+                <th>Rank</th>
+                <th>System</th>
+                <th>Average NDCG@10</th>
+            </tr>
+    
+            <tr>
+                <td>1</td>
+                <td>Field-weighted LSI with BERT-enhanced indexing with BERT reranking</td>
+                <td>0.97161</td>
+            </tr>
+        
+            <tr>
+                <td>2</td>
+                <td>Basic LSI with k=150 dimensions with BERT reranking</td>
+                <td>0.96945</td>
+            </tr>
+        
+            <tr>
+                <td>3</td>
+                <td>Field-weighted LSI with BERT reranking</td>
+                <td>0.96611</td>
+            </tr>
+        
+            <tr>
+                <td>4</td>
+                <td>BM25 baseline</td>
+                <td>0.95814</td>
+            </tr>
+        
+            <tr>
+                <td>5</td>
+                <td>Basic LSI with k=150 dimensions</td>
+                <td>0.78454</td>
+            </tr>
+        
+            <tr>
+                <td>6</td>
+                <td>Field-weighted LSI with BERT-enhanced indexing</td>
+                <td>0.74175</td>
+            </tr>
+        
+            <tr>
+                <td>7</td>
+                <td>Field-weighted LSI</td>
+                <td>0.73396</td>
+            </tr>
+        
+        </table>
+        
+        <h2>Visualization</h2>
+    
+        <div class="plot">
+            <img src="ndcg_comparison.png" alt="NDCG Comparison">
+        </div>
+    
+            <div class="plot">
+                <h3>Zoomed View (Magnified Differences)</h3>
+                <img src="ndcg_comparison_zoomed.png" alt="NDCG Comparison (Zoomed)">
+            </div>
+        
+        <footer>
+            <p>Generated at: <script>document.write(new Date().toLocaleString());</script></p>
+        </footer>
+    </body>
+    </html>
+    

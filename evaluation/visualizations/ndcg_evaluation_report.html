@@ -1,0 +1,189 @@
+
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>NDCG Evaluation Results</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            h1, h2, h3 { color: #2c3e50; }
+            table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+            th, td { text-align: left; padding: 8px; }
+            th { background-color: #3498db; color: white; }
+            tr:nth-child(even) { background-color: #f2f2f2; }
+            .plot { margin: 20px 0; text-align: center; }
+            .plot img { max-width: 100%; height: auto; border: 1px solid #ddd; }
+            .summary { background-color: #eef; padding: 15px; border-radius: 5px; }
+        </style>
+    </head>
+    <body>
+        <h1>NDCG Evaluation Results</h1>
+        
+        <div class="summary">
+            <h2>Summary</h2>
+            <p>This report presents a comprehensive analysis of the performance of different search engine variants based on NDCG@10 metrics.</p>
+        </div>
+        
+        <h2>Overall System Performance</h2>
+        <table>
+            <tr>
+                <th>Rank</th>
+                <th>System</th>
+                <th>Average NDCG@10</th>
+            </tr>
+    
+            <tr>
+                <td>1</td>
+                <td>Field-weighted LSI with BERT-enhanced indexing</td>
+                <td>0.9716</td>
+            </tr>
+        
+            <tr>
+                <td>2</td>
+                <td>Basic LSI with k=150 dimensions</td>
+                <td>0.9695</td>
+            </tr>
+        
+            <tr>
+                <td>3</td>
+                <td>Field-weighted LSI</td>
+                <td>0.9661</td>
+            </tr>
+        
+            <tr>
+                <td>4</td>
+                <td>BM25 baseline</td>
+                <td>0.9581</td>
+            </tr>
+        
+        </table>
+        
+        <h2>Visualizations</h2>
+    
+        <div class="plot">
+            <h3>Overall Comparison</h3>
+            <img src="ndcg_overall_comparison.png" alt="Overall Comparison">
+        </div>
+        
+        <div class="plot">
+            <h3>Query Heatmap</h3>
+            <img src="ndcg_query_heatmap.png" alt="Query Heatmap">
+        </div>
+        
+        <div class="plot">
+            <h3>Score Distribution</h3>
+            <img src="ndcg_score_distribution.png" alt="Score Distribution">
+        </div>
+        
+        <div class="plot">
+            <h3>Radar Chart</h3>
+            <img src="ndcg_radar_chart.png" alt="Radar Chart">
+        </div>
+        
+        <div class="plot">
+            <h3>Improvement Comparison</h3>
+            <img src="ndcg_improvement_comparison.png" alt="Improvement Comparison">
+        </div>
+        
+        <h2>Detailed Query Results</h2>
+        <table>
+            <tr>
+                <th>Query ID</th>
+    <th>Field-weighted LSI with BERT-enhanced indexing</th><th>Basic LSI with k=150 dimensions</th><th>Field-weighted LSI</th><th>BM25 baseline</th></tr>
+            <tr>
+                <td>Q1</td>
+        <td>0.9830</td><td>0.9759</td><td>0.9849</td><td>0.9703</td></tr>
+            <tr>
+                <td>Q2</td>
+        <td>0.9794</td><td>0.9630</td><td>0.9668</td><td>0.9677</td></tr>
+            <tr>
+                <td>Q3</td>
+        <td>0.9881</td><td>0.9934</td><td>0.9899</td><td>0.9045</td></tr>
+            <tr>
+                <td>Q4</td>
+        <td>0.9879</td><td>0.9486</td><td>0.9960</td><td>0.9581</td></tr>
+            <tr>
+                <td>Q5</td>
+        <td>0.9656</td><td>0.9576</td><td>0.9505</td><td>0.9659</td></tr>
+            <tr>
+                <td>Q6</td>
+        <td>0.9591</td><td>0.9628</td><td>0.9581</td><td>0.9752</td></tr>
+            <tr>
+                <td>Q7</td>
+        <td>0.9824</td><td>0.9808</td><td>0.9809</td><td>0.9819</td></tr>
+            <tr>
+                <td>Q8</td>
+        <td>0.9755</td><td>0.9711</td><td>0.9763</td><td>0.9321</td></tr>
+            <tr>
+                <td>Q9</td>
+        <td>0.9776</td><td>0.9677</td><td>0.9668</td><td>0.9245</td></tr>
+            <tr>
+                <td>Q10</td>
+        <td>0.9621</td><td>0.9646</td><td>0.9692</td><td>0.9530</td></tr>
+            <tr>
+                <td>Q11</td>
+        <td>0.9794</td><td>0.9610</td><td>0.9808</td><td>0.8965</td></tr>
+            <tr>
+                <td>Q12</td>
+        <td>0.9857</td><td>0.9789</td><td>0.9693</td><td>0.9847</td></tr>
+            <tr>
+                <td>Q13</td>
+        <td>0.9888</td><td>0.9855</td><td>0.9903</td><td>0.9782</td></tr>
+            <tr>
+                <td>Q14</td>
+        <td>0.9809</td><td>0.9629</td><td>0.9280</td><td>0.9704</td></tr>
+            <tr>
+                <td>Q15</td>
+        <td>0.9030</td><td>0.9690</td><td>0.9028</td><td>0.9836</td></tr>
+            <tr>
+                <td>Q16</td>
+        <td>0.9943</td><td>0.9856</td><td>0.9950</td><td>0.9966</td></tr>
+            <tr>
+                <td>Q17</td>
+        <td>0.9809</td><td>0.9828</td><td>0.8948</td><td>0.9826</td></tr>
+            <tr>
+                <td>Q18</td>
+        <td>0.9833</td><td>0.9441</td><td>0.9595</td><td>0.9621</td></tr>
+            <tr>
+                <td>Q19</td>
+        <td>0.9847</td><td>0.9829</td><td>0.9934</td><td>0.9334</td></tr>
+            <tr>
+                <td>Q20</td>
+        <td>0.9556</td><td>0.9797</td><td>0.9787</td><td>0.9516</td></tr>
+            <tr>
+                <td>Q21</td>
+        <td>0.9851</td><td>0.9767</td><td>0.9758</td><td>0.9578</td></tr>
+            <tr>
+                <td>Q22</td>
+        <td>0.9884</td><td>0.9918</td><td>0.9874</td><td>0.9749</td></tr>
+            <tr>
+                <td>Q23</td>
+        <td>0.9573</td><td>0.9742</td><td>0.9575</td><td>0.9018</td></tr>
+            <tr>
+                <td>Q24</td>
+        <td>0.9867</td><td>0.9740</td><td>0.9942</td><td>0.9262</td></tr>
+            <tr>
+                <td>Q25</td>
+        <td>0.9038</td><td>0.9493</td><td>0.9289</td><td>0.9515</td></tr>
+            <tr>
+                <td>Q26</td>
+        <td>0.9689</td><td>0.9609</td><td>0.9204</td><td>0.9699</td></tr>
+            <tr>
+                <td>Q27</td>
+        <td>0.9140</td><td>0.9249</td><td>0.9276</td><td>0.9656</td></tr>
+            <tr>
+                <td>Q28</td>
+        <td>0.9854</td><td>0.9837</td><td>0.9854</td><td>0.9657</td></tr>
+            <tr>
+                <td>Q29</td>
+        <td>0.9840</td><td>0.9868</td><td>0.9916</td><td>0.9925</td></tr>
+            <tr>
+                <td>Q30</td>
+        <td>0.9775</td><td>0.9438</td><td>0.9828</td><td>0.9654</td></tr>
+        </table>
+        
+        <footer>
+            <p>Generated at: <script>document.write(new Date().toLocaleString());</script></p>
+        </footer>
+    </body>
+    </html>
+    

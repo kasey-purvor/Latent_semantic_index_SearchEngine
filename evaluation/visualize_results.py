@@ -256,6 +256,108 @@ def create_all_visualizations(summary_file_path, detailed_file_path):
     logging.info(f"All visualizations saved to: {CHARTS_DIR}")
     return True
 
+def load_ndcg_metrics():
+    """Load the most recent nDCG metrics file."""
+    eval_dir = Path(__file__).parent / "evaluations"
+    metrics_files = list(eval_dir.glob("ndcg_metrics_*.json"))
+    if not metrics_files:
+        logging.warning("No nDCG metrics files found. Run the evaluation pipeline first.")
+        return None
+    
+    # Sort by modification time (newest first)
+    latest_metrics = max(metrics_files, key=lambda f: f.stat().st_mtime)
+    logging.info(f"Loading nDCG metrics from {latest_metrics}")
+    
+    try:
+        with open(latest_metrics, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        logging.error(f"Failed to load nDCG metrics: {e}")
+        return None
+
+def plot_ndcg_comparison(ndcg_metrics, output_dir):
+    """Plot a comparison of nDCG@10 scores across systems."""
+    if not ndcg_metrics or "system_averages" not in ndcg_metrics:
+        logging.warning("No valid nDCG metrics found for visualization")
+        return
+    
+    system_averages = ndcg_metrics["system_averages"]
+    
+    # Sort systems by nDCG score (descending)
+    sorted_systems = sorted(
+        system_averages.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+    
+    # Create bar chart
+    plt.figure(figsize=(12, 6))
+    
+    systems = [s[0] for s in sorted_systems]
+    scores = [s[1] for s in sorted_systems]
+    
+    # Create color map
+    cmap = plt.cm.viridis
+    colors = cmap(np.linspace(0, 0.8, len(systems)))
+    
+    bars = plt.bar(systems, scores, color=colors)
+    
+    plt.title("Average nDCG@10 Scores by Search System", fontsize=16)
+    plt.xlabel("Search System", fontsize=14)
+    plt.ylabel("nDCG@10", fontsize=14)
+    plt.ylim(0, 1.0)  # nDCG ranges from 0 to 1
+    
+    # Add value labels on top of each bar
+    for bar in bars:
+        height = bar.get_height()
+        plt.text(
+            bar.get_x() + bar.get_width()/2.,
+            height + 0.01,
+            f"{height:.3f}",
+            ha='center',
+            va='bottom',
+            fontsize=10
+        )
+    
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    
+    # Save the figure
+    plt.savefig(os.path.join(output_dir, "ndcg_comparison.png"))
+    logging.info(f"Saved nDCG@10 comparison chart to {output_dir}/ndcg_comparison.png")
+    
+    # Optional: also save per-query nDCG scores for more detailed analysis
+    if "query_ndcg" in ndcg_metrics:
+        plot_query_ndcg_heatmap(ndcg_metrics["query_ndcg"], output_dir)
+
+def plot_query_ndcg_heatmap(query_ndcg, output_dir):
+    """Create a heatmap of nDCG@10 scores per query and system."""
+    # Convert to DataFrame for easier plotting
+    data = []
+    for query_id, system_scores in query_ndcg.items():
+        for system, score in system_scores.items():
+            data.append({
+                "Query": f"Q{query_id}",
+                "System": system,
+                "nDCG@10": score
+            })
+    
+    df = pd.DataFrame(data)
+    
+    # Create pivot table
+    pivot = df.pivot(index="System", columns="Query", values="nDCG@10")
+    
+    # Create heatmap
+    plt.figure(figsize=(16, 8))
+    sns.heatmap(pivot, annot=True, cmap="YlGnBu", fmt=".2f", linewidths=0.5)
+    
+    plt.title("nDCG@10 Scores by Query and System", fontsize=16)
+    plt.tight_layout()
+    
+    # Save the figure
+    plt.savefig(os.path.join(output_dir, "ndcg_heatmap.png"))
+    logging.info(f"Saved nDCG@10 heatmap to {output_dir}/ndcg_heatmap.png")
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description="Visualize search engine evaluation results")
@@ -283,6 +385,12 @@ def main():
         return 1
     
     success = create_all_visualizations(summary_file, detailed_file)
+    
+    # Load and visualize nDCG metrics if available
+    ndcg_metrics = load_ndcg_metrics()
+    if ndcg_metrics:
+        plot_ndcg_comparison(ndcg_metrics, EVALUATION_DIR)
+    
     return 0 if success else 1
 
 if __name__ == "__main__":

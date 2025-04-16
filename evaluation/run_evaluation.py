@@ -6,7 +6,8 @@ This script:
 1. Runs all test queries through each search engine variant
 2. Collects search results
 3. Evaluates results using the judge blender system
-4. Generates a summary of the evaluations
+4. Calculates nDCG@10 metrics for search engine comparison
+5. Generates a summary of the evaluations
 """
 
 import os
@@ -64,6 +65,19 @@ def run_pipeline():
     result = os.system(f"python {judge_blender_script} --results-file {pooled_results_file}")
     if result != 0:
         logging.error("Failed to run judge blender evaluation")
+        return False
+    
+    # Step 4: Calculate nDCG@10 metrics
+    logging.info("Step 4: Calculating nDCG@10 metrics")
+    ndcg_script = Path(__file__).parent / "ndcg_calculator.py"
+    if not ndcg_script.exists():
+        logging.error(f"Script not found: {ndcg_script}")
+        return False
+    
+    logging.info(f"Running: {ndcg_script}")
+    result = os.system(f"python {ndcg_script}")
+    if result != 0:
+        logging.error("Failed to calculate nDCG@10 metrics")
         return False
     
     # Look for most recent evaluation summary

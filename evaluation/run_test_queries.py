@@ -3,6 +3,9 @@
 Run all test queries against each search engine variant and save the results.
 This script automates the process of querying each search engine variant with
 the 30 test queries and storing the results for evaluation.
+
+Each search engine variant is run both with and without BERT reranking to
+enable comparison of the effect of reranking on search quality.
 """
 
 import os
@@ -49,6 +52,7 @@ RESULTS_DIR = Path(__file__).parent / "results"
 # Caching mechanism to avoid reloading for each query
 loaded_indexers = {}  # Cache for loaded indexers
 papers_data = None    # Global cache for papers data
+bert_reranker = None  # Global cache for BERT reranker
 
 
 def ensure_results_directory():
@@ -56,13 +60,34 @@ def ensure_results_directory():
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     
 
-def run_query_on_search_engine(query: str, variant_id: int, top_n: int = 50):
+def load_bert_reranker():
+    """Initialize and return the BERT reranker."""
+    global bert_reranker
+    
+    if bert_reranker is None:
+        try:
+            # Import the reranker
+            from faiss_bert_reranking import BertFaissReranker
+            
+            logging.info("Initializing BERT-FAISS reranker")
+            bert_reranker = BertFaissReranker(model_name="C-KAI/sbert-academic-group44")
+            bert_reranker.initialize()
+            logging.info("BERT-FAISS reranker initialized successfully")
+        except Exception as e:
+            logging.error(f"Failed to initialize BERT reranker: {e}")
+            return None
+    
+    return bert_reranker
+
+
+def run_query_on_search_engine(query: str, variant_id: int, apply_reranking: bool = False, top_n: int = 50):
     """
     Run a query on a specific search engine variant
     
     Args:
         query: The search query to run
         variant_id: The identifier for the search engine variant
+        apply_reranking: Whether to apply BERT reranking
         top_n: Number of top results to return (default 50)
         
     Returns:
@@ -75,7 +100,6 @@ def run_query_on_search_engine(query: str, variant_id: int, top_n: int = 50):
     
     from indexing import load_papers
     from src.main import DEFAULT_DATA_DIR, DEFAULT_MODEL_DIR
-    from faiss_bert_reranking import BertFaissReranker
     
     # Load papers data only once across all queries
     if papers_data is None:
@@ -114,36 +138,42 @@ def run_query_on_search_engine(query: str, variant_id: int, top_n: int = 50):
         indexer = loaded_indexers[index_type]
         logging.info(f"Using cached {index_type} index")
     
+    # Track the applied methods for result naming
+    variant_name = SEARCH_ENGINE_VARIANTS[variant_id]
+    
     # Search for documents
-    logging.info(f"Running query '{query}' on {SEARCH_ENGINE_VARIANTS[variant_id]}")
+    logging.info(f"Running query '{query}' on {variant_name}")
     results = indexer.search(query, top_k=top_n)
     
-    # Skip BERT reranking for BM25 as it should remain a pure baseline
-    if index_type != 'bm25':
-        # Initialize BERT reranker and rerank results
-        try:
-            logging.info(f"Applying BERT-FAISS reranking to search results")
-            bert_reranker = BertFaissReranker(model_name="C-KAI/sbert-academic-group44")
-            bert_reranker.initialize()
-            
-            # Ensure all search results have string paper_id for consistent matching
-            for result in results:
-                if 'paper_id' in result and result['paper_id'] is not None:
-                    result['paper_id'] = str(result['paper_id'])
-            
-            # Apply reranking
-            reranking_top_k = min(10, len(results))  # Rerank top 10 results or all if less than 10
-            results = bert_reranker.rerank(query, results, top_k=reranking_top_k)
-            logging.info(f"Reranking complete. Returning top {reranking_top_k} results.")
-        except Exception as e:
-            logging.error(f"Failed to initialize BERT reranker or rerank results: {e}")
-            logging.info("Continuing with non-reranked results")
+    # Ensure consistent paper_id format
+    for result in results:
+        if 'paper_id' in result and result['paper_id'] is not None:
+            result['paper_id'] = str(result['paper_id'])
+    
+    # Apply BERT reranking if requested
+    if apply_reranking:
+        reranker = load_bert_reranker()
+        if reranker:
+            try:
+                logging.info(f"Reranking {len(results)} results with BERT")
+                
+                # Apply reranking
+                reranking_top_k = min(10, len(results))  # Rerank top 10 results or all if less than 10
+                reranked_results = reranker.rerank(query, results, top_k=reranking_top_k)
+                
+                # Preserve original rank and score information
+                for i, result in enumerate(reranked_results):
+                    if i < len(results):
+                        result['original_rank'] = i + 1
+                        result['original_score'] = results[i].get('score', 0.0)
+                
+                logging.info(f"Reranking complete. Returning top {reranking_top_k} results ranked by BERT similarity.")
+                results = reranked_results
+            except Exception as e:
+                logging.error(f"BERT reranking failed: {e}")
+                logging.info("Continuing with non-reranked results")
     else:
-        logging.info(f"Skipping BERT-FAISS reranking for BM25 baseline")
-        # Still ensure paper_id is string for consistency
-        for result in results:
-            if 'paper_id' in result and result['paper_id'] is not None:
-                result['paper_id'] = str(result['paper_id'])
+        logging.info(f"Skipping BERT reranking as per configuration")
     
     # Debug: Check what fields the search engine returns directly
     if results and len(results) > 0:
@@ -190,14 +220,25 @@ def run_all_queries():
         logging.info(f"Processing query {query_id}: '{query_text}'")
         
         for variant_id in SEARCH_ENGINE_VARIANTS.keys():
+            variant_name = SEARCH_ENGINE_VARIANTS[variant_id]
+            
+            # Run each variant without BERT reranking first
             try:
-                # Using the default top_n parameter (50)
-                results = run_query_on_search_engine(query_text, variant_id)
-                variant_name = SEARCH_ENGINE_VARIANTS[variant_id]
+                results = run_query_on_search_engine(query_text, variant_id, apply_reranking=False)
                 query_results[variant_name] = results
                 logging.info(f"  Got {len(results)} results from {variant_name}")
             except Exception as e:
-                logging.error(f"Error running query {query_id} on variant {variant_id}: {e}")
+                logging.error(f"Error running query {query_id} on {variant_name}: {e}")
+            
+            # Run with BERT reranking (except for BM25 baseline which should remain pure)
+            if variant_id != 1:  # Skip reranking for BM25
+                try:
+                    reranked_results = run_query_on_search_engine(query_text, variant_id, apply_reranking=True)
+                    reranked_name = f"{variant_name} with BERT reranking"
+                    query_results[reranked_name] = reranked_results
+                    logging.info(f"  Got {len(reranked_results)} results from {reranked_name}")
+                except Exception as e:
+                    logging.error(f"Error running query {query_id} on {reranked_name}: {e}")
         
         # Store query results
         all_results[query_id] = {

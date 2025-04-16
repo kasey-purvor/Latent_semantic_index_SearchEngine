@@ -1,0 +1,147 @@
+/* Base styling */
+:root {
+  --primary-color: #3a56e4;
+  --secondary-color: #6c757d;
+  --light-gray: #f8f9fa;
+  --dark-bg: #212529;
+}
+
+body {
+  background-color: var(--light-gray);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+}
+
+.App {
+  min-height: 100vh;
+  padding-bottom: 2rem;
+}
+
+/* Layout styling - Fixed widths to prevent layout shifts */
+.app-container {
+  display: flex;
+  justify-content: flex-start;
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+}
+
+.d-flex {
+  width: 100%;
+  display: flex;
+  flex-direction: row;
+  gap: 1.5rem;
+}
+
+.search-panel {
+  width: 400px;
+  flex: 0 0 400px;
+  padding: 0;
+}
+
+.search-options-container {
+  width: 100%;
+}
+
+.search-query-section {
+  margin-top: 1.5rem !important;
+  width: 100%;
+}
+
+.search-input {
+  height: 50px;
+  font-size: 1.1rem;
+}
+
+.results-panel {
+  flex: 1;
+  padding: 0;
+  overflow-y: auto;
+}
+
+.results-loading {
+  background-color: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Empty state for results panel */
+.results-empty-state {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 300px;
+  color: var(--secondary-color);
+  background-color: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  margin-top: 1rem;
+}
+
+/* Header styling */
+.navbar-brand h1 {
+  font-weight: 600;
+}
+
+/* Card styling */
+.card {
+  border-radius: 0.5rem;
+  overflow: hidden;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  width: 100%;
+  margin-bottom: 1rem;
+}
+
+.card-header {
+  padding: 0.75rem 1.25rem;
+}
+
+.card-body {
+  padding: 1.25rem;
+}
+
+/* Form styling */
+.form-control:focus,
+.form-select:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 0.25rem rgba(58, 86, 228, 0.25);
+}
+
+.btn-primary {
+  background-color: var(--primary-color);
+  border-color: var(--primary-color);
+  height: 50px;
+  min-width: 100px;
+}
+
+.btn-primary:hover {
+  background-color: #2a46d4;
+  border-color: #2a46d4;
+}
+
+/* Results styling */
+.result-score {
+  font-size: 0.9rem;
+  color: var(--primary-color);
+}
+
+/* Badge styling */
+.badge {
+  font-weight: 500;
+  padding: 0.4em 0.6em;
+}
+
+/* Media queries for responsive design */
+@media (max-width: 992px) {
+  .d-flex {
+    flex-direction: column;
+  }
+  
+  .search-panel {
+    width: 100%;
+    flex: auto;
+    margin-bottom: 1.5rem;
+  }
+  
+  .results-panel {
+    width: 100%;
+  }
+}

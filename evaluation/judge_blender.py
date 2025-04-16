@@ -4,7 +4,7 @@ Judge Blender Evaluation System
 
 This module implements a blended judgment system using two LLMs to evaluate search results
 from different search engine variants. The judges evaluate the relevance of search results
-on a scale of 1-4.
+on a continuous scale from 1.0-4.0.
 """
 
 import os
@@ -94,7 +94,7 @@ class JudgeModel:
         """
         raise NotImplementedError("Subclasses must implement this method")
         
-    def extract_score(self, response: str) -> int:
+    def extract_score(self, response: str) -> float:
         """
         Extract relevance scores from the model's response.
         
@@ -102,11 +102,14 @@ class JudgeModel:
             response: Model's text response
             
         Returns:
-            Dictionary with dimension scores and overall score, or single overall score for backward compatibility
+            Float score representing the relevance score (weighted average)
         """
-        # Look for the structured format with dimension scores
+        # Log the raw response for debugging
+        logging.debug(f"Raw response: {response}")
+        
+        # Extract dimension scores
         dimension_scores = {}
-        dimension_names = ["keyword relevance", "search intent alignment", "expected utility", "overall relevance"]
+        dimension_names = ["keyword relevance", "search intent alignment", "expected utility"]
         
         # Find all dimension scores in the response
         for dimension in dimension_names:
@@ -120,11 +123,10 @@ class JudgeModel:
                 except (ValueError, IndexError):
                     continue
         
-        # If we have an overall score, return it
-        if "overall relevance" in dimension_scores:
-            return dimension_scores["overall relevance"]
+        # Log the extracted dimension scores
+        logging.info(f"Extracted dimension scores: {dimension_scores}")
         
-        # If we have at least one dimension score but no overall, calculate a weighted average
+        # Calculate weighted average if we have dimension scores
         if dimension_scores:
             # Use weights that emphasize query alignment and keyword relevance
             weights = {
@@ -142,10 +144,14 @@ class JudgeModel:
                     total_weight += weights[dim]
             
             if total_weight > 0:
-                # Round to nearest integer
-                return round(weighted_sum / total_weight)
+                final_score = weighted_sum / total_weight
+                logging.info(f"Calculated weighted score: {final_score:.2f}")
+                return final_score
         
-        # Fall back to the old approach if no structured scores found
+        # Fallback for when dimension scores aren't found
+        logging.warning(f"No dimension scores found in response, using fallback method")
+        
+        # Fallback logic with more defensive parsing
         for line in response.split('\n'):
             line = line.strip()
             if line.startswith("Score:") or line.startswith("Relevance Score:"):
@@ -153,20 +159,14 @@ class JudgeModel:
                     score_text = line.split(':')[1].strip()
                     score = int(score_text[0])  # Take first digit
                     if 1 <= score <= 4:
-                        return score
+                        logging.info(f"Using fallback score: {score}")
+                        return float(score)
                 except (ValueError, IndexError):
                     continue
-                    
-        # If no clear score, look for keywords
-        lower_resp = response.lower()
-        if "excellent" in lower_resp or "highly relevant" in lower_resp:
-            return 4
-        elif "good" in lower_resp or "relevant" in lower_resp:
-            return 3
-        elif "fair" in lower_resp or "marginally" in lower_resp or "somewhat" in lower_resp:
-            return 2
-        else:
-            return 1  # Default to not relevant
+        
+        # Last resort fallback
+        logging.error(f"Failed to extract any scores, defaulting to 1.0")
+        return 1.0
             
     def unload_model(self):
         """Unload the model and free GPU memory."""
@@ -197,7 +197,7 @@ class GemmaJudge(JudgeModel):
             "text-generation",
             model=model,
             tokenizer=tokenizer,
-            max_new_tokens=32,
+            max_new_tokens=128,
             do_sample=False,
             batch_size=MODEL_BATCH_SIZE  # Enable proper GPU batch processing
         )
@@ -333,7 +333,7 @@ class MistralJudge(JudgeModel):
             "text-generation",
             model=model,
             tokenizer=tokenizer,
-            max_new_tokens=32,
+            max_new_tokens=128,
             do_sample=False,
             batch_size=MODEL_BATCH_SIZE  # Enable proper GPU batch processing
         )
@@ -455,7 +455,7 @@ class Phi3Judge(JudgeModel):
             "text-generation",
             model=model,
             tokenizer=tokenizer,
-            max_new_tokens=32,
+            max_new_tokens=128,
             do_sample=False,
             batch_size=MODEL_BATCH_SIZE  # Enable proper GPU batch processing
         )
@@ -601,7 +601,7 @@ def format_evaluation_prompt(query_data: Dict[str, Any], result: Dict[str, Any])
     if metadata_text:
         metadata_text = f"\n{metadata_text}"
     
-    # Format prompt for multi-dimensional evaluation with 3 dimensions
+    # Updated prompt that focuses only on the three dimension scores without justification or overall score
     prompt = f"""You are a judge evaluating the relevance of an academic search result for a query.
 
 QUERY: "{query_text}"
@@ -623,11 +623,10 @@ Rate this search result on three dimensions using scores of 1-4 (1=Poor, 2=Fair,
 2. SEARCH INTENT ALIGNMENT: How well the document addresses the query's information need
 3. EXPECTED UTILITY: How useful this document would be to a researcher
 
-Provide ratings WITHOUT explanations in this exact format:
+IMPORTANT: Provide ONLY the ratings WITHOUT any explanation or justification in this exact format:
 Keyword Relevance: [SCORE]
 Search Intent Alignment: [SCORE]
 Expected Utility: [SCORE]
-Overall Relevance: [SCORE]
 """
     return prompt
 
@@ -891,6 +890,7 @@ def run_sequential_evaluation(results_file: Path, batch_size: int = DEFAULT_BATC
             evaluation_entry = {
                 'result_index': result_index,
                 'title': result.get('title', 'No title'),
+                'paper_id': result.get('paper_id', None),
                 'gemma_evaluation': gemma_eval,
                 'mistral_evaluation': mistral_eval,
                 'phi3_evaluation': phi3_eval,
@@ -926,7 +926,14 @@ def create_evaluation_summary(evaluations: Dict[str, Any], output_file: Path) ->
     # Initialize counters
     total_results = 0
     score_sum = 0
-    score_distributions = {1: 0, 2: 0, 3: 0, 4: 0}
+    
+    # Use score ranges for distribution instead of discrete integers
+    score_ranges = {
+        "1.0-1.9": 0,
+        "2.0-2.9": 0,
+        "3.0-3.9": 0,
+        "4.0": 0
+    }
     
     # Process each query
     for query_id, query_eval in evaluations['query_evaluations'].items():
@@ -941,7 +948,12 @@ def create_evaluation_summary(evaluations: Dict[str, Any], output_file: Path) ->
         query_avg = query_sum / query_total if query_total > 0 else 0
         
         # Count scores by range
-        query_distribution = {1: 0, 2: 0, 3: 0, 4: 0}
+        query_distribution = {
+            "1.0-1.9": 0,
+            "2.0-2.9": 0,
+            "3.0-3.9": 0,
+            "4.0": 0
+        }
         
         # Initialize dimension sums for this query
         query_dimension_stats = {
@@ -952,10 +964,20 @@ def create_evaluation_summary(evaluations: Dict[str, Any], output_file: Path) ->
         
         for result in query_results:
             score = result['blended_score']
-            rounded_score = round(score)
-            if 1 <= rounded_score <= 4:
-                query_distribution[rounded_score] += 1
-                score_distributions[rounded_score] += 1
+            
+            # Assign to appropriate score range
+            if score < 2.0:
+                query_distribution["1.0-1.9"] += 1
+                score_ranges["1.0-1.9"] += 1
+            elif score < 3.0:
+                query_distribution["2.0-2.9"] += 1
+                score_ranges["2.0-2.9"] += 1
+            elif score < 4.0:
+                query_distribution["3.0-3.9"] += 1
+                score_ranges["3.0-3.9"] += 1
+            else:
+                query_distribution["4.0"] += 1
+                score_ranges["4.0"] += 1
             
             # Extract dimension scores if available from Gemma and Mistral evaluations
             for model_name in ['gemma_evaluation', 'mistral_evaluation', 'phi3_evaluation']:
@@ -1020,7 +1042,7 @@ def create_evaluation_summary(evaluations: Dict[str, Any], output_file: Path) ->
         'total_queries': len(summary['query_summaries']),
         'total_results': total_results,
         'average_score': overall_avg,
-        'score_distribution': score_distributions,
+        'score_distribution': score_ranges,
         'dimension_averages': dimension_averages
     }
     
