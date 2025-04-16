@@ -13,6 +13,8 @@
             .plot { margin: 20px 0; text-align: center; }
             .plot img { max-width: 100%; height: auto; border: 1px solid #ddd; }
             .summary { background-color: #eef; padding: 15px; border-radius: 5px; }
+            .bert { background-color: #ffe; }
+            .baseline { font-weight: bold; }
         </style>
     </head>
     <body>
@@ -31,46 +33,46 @@
                 <th>Average NDCG@10</th>
             </tr>
     
-            <tr>
+            <tr class="baseline">
                 <td>1</td>
-                <td>Field-weighted LSI with BERT-enhanced indexing with BERT reranking</td>
-                <td>0.97161</td>
-            </tr>
-        
-            <tr>
-                <td>2</td>
-                <td>Basic LSI with k=150 dimensions with BERT reranking</td>
-                <td>0.96945</td>
-            </tr>
-        
-            <tr>
-                <td>3</td>
-                <td>Field-weighted LSI with BERT reranking</td>
-                <td>0.96611</td>
-            </tr>
-        
-            <tr>
-                <td>4</td>
                 <td>BM25 baseline</td>
-                <td>0.95814</td>
+                <td>0.95801</td>
             </tr>
         
-            <tr>
-                <td>5</td>
+            <tr class="">
+                <td>2</td>
                 <td>Basic LSI with k=150 dimensions</td>
-                <td>0.78454</td>
+                <td>0.96157</td>
             </tr>
         
-            <tr>
-                <td>6</td>
+            <tr class="">
+                <td>3</td>
                 <td>Field-weighted LSI with BERT-enhanced indexing</td>
-                <td>0.74175</td>
+                <td>0.94845</td>
             </tr>
         
-            <tr>
-                <td>7</td>
+            <tr class="">
+                <td>4</td>
                 <td>Field-weighted LSI</td>
-                <td>0.73396</td>
+                <td>0.94521</td>
+            </tr>
+        
+            <tr class="bert">
+                <td>5</td>
+                <td>Field-weighted LSI with BERT-enhanced indexing with BERT reranking</td>
+                <td>0.96954</td>
+            </tr>
+        
+            <tr class="bert">
+                <td>6</td>
+                <td>Basic LSI with k=150 dimensions with BERT reranking</td>
+                <td>0.96777</td>
+            </tr>
+        
+            <tr class="bert">
+                <td>7</td>
+                <td>Field-weighted LSI with BERT reranking</td>
+                <td>0.96454</td>
             </tr>
         
         </table>
