@@ -73,7 +73,7 @@ To stop both services, press Ctrl+C in the terminal where you started them.
 **Note for Dropbox users:** If you received this application via Dropbox, the indexes are already built and the BERT model (and the judgeblender LLMs) are already downloaded. You can skip the rest of this instructions and go directly to running the application ```bash
 # Run both frontend and backend
 python run.py
-```
+
 
 **Only if cloning from GitHub:** You'll need to build the search indexes and download the BERT model(and the judgeblender LLMs) before using the application.
 
