@@ -48,7 +48,7 @@ def run_app(debug=False):
     
     # Start Flask backend
     print("Starting Flask backend server...")
-    backend_cmd = [sys.executable, str(backend_file)]
+    backend_cmd = [sys.executable, str(backend_file), "--port", "5001"]
     if debug:
         backend_cmd.append("--debug")
     
@@ -72,13 +72,50 @@ def run_app(debug=False):
     
     # Run npm dev server
     os.chdir(frontend_dir)
-    frontend_process = subprocess.Popen(["npm", "run", "dev"])
+    frontend_process = subprocess.Popen(["npm", "run", "dev"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     processes.append(frontend_process)
     
-    print("\nApplication is now running!")
-    print("- Backend: http://localhost:5000")
-    print("- Frontend: http://localhost:5173 (may be different if port is already in use)")
-    print("\nPress Ctrl+C to stop all services")
+    # Wait a moment for the frontend to start and capture its output to get the URL
+    time.sleep(3)
+    
+    # Default frontend URL
+    frontend_url = "http://localhost:5173"
+    
+    # Try to read the actual URL from the Vite output
+    if frontend_process.stdout:
+        for i in range(20):  # Try reading a few lines
+            line = frontend_process.stdout.readline().strip()
+            if "Local:" in line and "http" in line:
+                # Extract URL from something like "Local:   http://localhost:5173/"
+                parts = line.split("Local:")
+                if len(parts) > 1:
+                    url_part = parts[1].strip()
+                    if url_part.startswith("http"):
+                        frontend_url = url_part
+                        break
+            if not line and i > 5:
+                break
+            time.sleep(0.1)
+    
+    print("\n")
+    print("="*80)
+    print("="*80)
+    print("                   APPLICATION IS NOW RUNNING!")
+    print("="*80)
+    print("="*80)
+    print("\n")
+    print("  IMPORTANT: USE THIS URL TO ACCESS THE SEARCH ENGINE:")
+    print("\n")
+    print("  >>>>>>>  " + frontend_url + "  <<<<<<<")
+    print("\n")
+    print("  COPY AND PASTE THIS URL INTO YOUR BROWSER")
+    print("\n")
+    print("  DO NOT use the backend URLs below that show 'Running on http://...'")
+    print("  Those are only for API access and won't display the search interface")
+    print("\n")
+    print("="*80)
+    print("Press Ctrl+C to stop all services")
+    print("="*80)
     
     # Keep the script running and monitor child processes
     try:
