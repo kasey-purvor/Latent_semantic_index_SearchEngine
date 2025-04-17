@@ -3,77 +3,94 @@ A search engine providing semantic search ability over academic papers.
 
 ## Features
 
+- Browser-based frontend for interactive searching
 - Multiple search index types (BM25, LSI basic, LSI field-weighted, BERT-enhanced LSI)
-- Command-line interface for indexing and searching
-- Interactive search mode
-- BERT-FAISS reranking for improved search quality
+- Command-line interface for indexing, searching and evaluation
+- BERT-FAISS reranking for improved search quality (with GPU acceleration)
 
 ## Installation
 
-### Method 1: Using requirements.txt
-1. Clone the repository
-2. Install dependencies: `pip install -r requirements.txt`
+### Environment Setup
 
-### Method 2: Manual installation
-Install core dependencies:
+The easiest way to set up the environment is using Conda with the provided environment.yml file:
+
 ```bash
-pip install numpy scipy scikit-learn pandas joblib tqdm matplotlib seaborn gensim nltk
+# Create and activate the environment
+conda env create -f environment.yml
+conda activate search_engine
+
+# Install frontend dependencies
+cd frontend
+npm install
+cd ..
 ```
 
-Install BERT and FAISS for semantic reranking:
+### PyTorch Installation
+
+#### For Windows
 ```bash
-pip install torch sentence-transformers faiss-cpu
+# Install PyTorch with CUDA support
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 ```
 
-Install visualization and keyword extraction tools:
+**Note:** BERT models use GPU acceleration, Windows will require Visual Studio with C++ extensions and runtime libraries.
+
+#### For Linux
 ```bash
-pip install pyLDAvis keybert
+# Install PyTorch with CUDA support
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 ```
+
+#### For Mac
+```bash
+# Install PyTorch (Mac does not support CUDA)
+pip3 install torch torchvision torchaudio
+```
+
+**Note:** Mac does not support CUDA, so BERT-enhanced models will run on CPU only, which may be significantly slower.
 
 ## Usage
 
-### Indexing documents
+### Running the Full Application (Frontend and Backend)
+
+The easiest way to run the complete application is to use the provided controller script:
 
 ```bash
-python src/main.py index --data-dir path/to/documents --index-type bm25
+# Run both frontend and backend
+python run.py
 ```
 
-Available index types:
-- `bm25`: BM25 baseline
-- `lsi_basic`: Basic LSI with default 150 dimensions
-- `lsi_field_weighted`: Field-weighted LSI
-- `lsi_bert_enhanced`: Field-weighted LSI with BERT-enhanced indexing
+This will start:
+- The Flask backend API on port 5000
+- The React frontend on port 5173 (may be different if the port is already in use)
 
-### Searching
+You can then access the application by opening your browser to http://localhost:5173
+
+To stop both services, press Ctrl+C in the terminal where you started them.
+
+### Indexing Documents and Model Setup
+
+**Note for Dropbox users:** If you received this application via Dropbox, the indexes are already built and the BERT model (and the judgeblender LLMs) are already downloaded. You can skip the rest of this instructions and go directly to running the application ```bash
+# Run both frontend and backend
+python run.py
+```
+
+**Only if cloning from GitHub:** You'll need to build the search indexes and download the BERT model(and the judgeblender LLMs) before using the application.
+
+To build the indexes:
 
 ```bash
-# Basic search
-python src/main.py search --index-type bm25
-
-# Search with BERT-FAISS reranking
-python src/main.py search --index-type bm25 --use-bert-reranking
+python src/main.py index
 ```
 
-Search options:
-- `--model-dir`: Directory containing model files (default: ../data/processed_data)
-- `--method`: Query representation method (binary, tfidf, log_entropy)
-- `--top-n`: Number of results to return (default: 50)
-- `--query`: Search query (if not provided, interactive mode is used)
-- `--use-bert-reranking`: Enable BERT-FAISS reranking for search results
-- `--reranking-top-k`: Number of results to return after BERT reranking (default: 5)
+This will start an interactive setup that guides you through the indexing process.
 
-### Interactive mode
+### Download BERT Model for Reranking
 
-You can also run the program without arguments to enter interactive setup mode:
+**Only if cloning from GitHub:** To use the BERT-FAISS reranking feature, you need to download the model:
+
 ```bash
-python src/main.py
+python src/main.py download-bert-model
 ```
 
-This will guide you through setting up your search or indexing operation with prompts.
-
-In interactive search mode, the following commands are available:
-- `method binary|tfidf|log_entropy`: Change query representation method
-- `top N`: Change number of results (e.g., `top 5`)
-- `rerank on|off`: Enable/disable BERT-FAISS reranking
-- `rerank N`: Change number of reranked results (e.g., `rerank 10`)
-- `quit` or `exit`: Exit the program
+This will download the necessary BERT model from Hugging Face for improved search result ranking.

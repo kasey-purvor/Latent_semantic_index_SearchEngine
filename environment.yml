@@ -1,0 +1,26 @@
+name: search_engine
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - numpy
+  - scipy
+  - scikit-learn
+  - pandas
+  - matplotlib
+  - seaborn
+  - nltk
+  - nodejs
+  - flask
+  - gensim
+  - joblib
+  - tqdm
+  - pip
+  - pip:
+    - sentence-transformers
+    - transformers
+    - faiss-cpu
+    - flask-cors
+    - pyLDAvis
+    - keybert 
