@@ -1,6 +1,11 @@
 # Latent Semantic Index Search Engine
 A search engine providing semantic search ability over academic papers.
 
+## Important Note About Post-Submission Commits
+All commits made after the submission deadline were solely focused on addressing submission difficulties. We encountered challenges with the standard 50MB upload limit and GitHub's rejection of our large index files and language models used for evaluation. As we believed the code would need to be used by assessors, we made modifications to ensure the front and backend operated smoothly and that anyone attempting to clone and replicate our search engine would have access to the multiple BERT models and large language models used in our project. We have not tested a duplicate installation using the provided YAML file, but we are confident that the dependencies are not strictly version-dependent and should work as expected.
+
+https://www.dropbox.com/scl/fo/cidvhccr8x4g8dyrgkzvw/AEPjGG67gbH_Qv5J8eXSj3k?rlkey=ecxc83xp9lyheckdcjtd58fhm&st=qjug6xe2&dl=0
+
 ## Features
 
 - Browser-based frontend for interactive searching
