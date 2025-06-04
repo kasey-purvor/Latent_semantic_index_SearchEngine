@@ -1,29 +1,44 @@
 # Latent Semantic Index Search Engine
-A search engine providing semantic search ability over academic papers.
 
-## Important Note About Post-Submission Commits
-All commits made after the submission deadline were solely focused on addressing submission difficulties. We encountered challenges with the standard 50MB upload limit and GitHub's rejection of our large index files and language models used for evaluation. As we believed the code would need to be used by assessors, we made modifications to ensure the front and backend operated smoothly and that anyone attempting to clone and replicate our search engine would have access to the multiple BERT models and large language models used in our project. We have not tested a duplicate installation using the provided YAML file, but we are confident that the dependencies are not strictly version-dependent and should work as expected.
+A sophisticated search engine that provides semantic search capabilities over academic papers, combining the power of Latent Semantic Indexing (LSI) with modern BERT-based neural language models to address synonymy and polysemy challenges in scholarly literature retrieval.
+!(png)[img/search_demo]
+## Project Overview
 
-***We hope this is not penalised more than thr 5% which we accept as valid. as there was very little in the way of guidance or warning that the standard 50mb upload limit would be the method of submition. Many late nights were spend Attending to this. And if you check the Github push history you will see that the search engine was completed well within the deadline although we did unfortunately submit it completed thing one day late, As we wanted to include a front end and a video showing it off.***
+This search engine implements a hybrid two-stage architecture that combines field-weighted Latent Semantic Indexing (LSI) with BERT-based neural language models. 
+* Stage 1 uses field-weighted LSI enhanced with KeyBERT keyword extraction for efficient candidate selection, applying higher weights to: 
+    * Keywords (3.0x), 
+    * document titles (3.0x) and 
+    * abstracts (1.5x) 
 
-The entire application which is 70GB can be downloaded here this includes the prevail indexes and the models used in the project.
-https://www.dropbox.com/scl/fo/cidvhccr8x4g8dyrgkzvw/AEPjGG67gbH_Qv5J8eXSj3k?rlkey=ecxc83xp9lyheckdcjtd58fhm&st=qjug6xe2&dl=0
+* Stage 2 provides
+  *  optional BERT-based semantic re-ranking using Sentence-BERT embeddings
+  *  with FAISS (Facebook AI Similarity Search) for approximate nearest neighbor search,
+  *  followed by a fine-tuned BERT classifier that scores document relevance.
+This architecture bridges traditional statistical information retrieval methods with modern neural language understanding, providing both computational efficiency and high-quality semantic search results for scholarly literature.
 
-### Indexing Documents and Model Setup
+![png](img/architecture_diagram.png)
 
-**Important note:** If you received this application via Dropbox, the indexes are already built and the BERT model (and the judgeblender LLMs) are already downloaded. You can skip the rest of this instructions and go directly to running the application ```bash
-# Run both frontend and backend
-python run.py
+## Evaluation and Results
 
+The following indexes were built for comparison:
 
-**Only if cloning from GitHub:** You'll need to build the search indexes and download the BERT model(and the judgeblender LLMs from hugging face if you intend to test the evaluation) before using the application.
+  - **BM25**: Traditional probabilistic ranking baseline
+  - **Basic LSI**: Standard Latent Semantic Indexing with uniform weighting
+  - **Field-Weighted LSI**: Enhanced LSI with title/abstract/body field weighting
+  - **BERT-Enhanced LSI**: Field-weighted LSI with KeyBERT keyword enhancement
+  - **Complete Hybrid System**: Full system with BERT-based semantic re-ranking
 
-## Features Attending Attending
+Our **complete hybrid system** was evaluated on 30 academic queries using NDCG@10 metrics with JudgeBlender relevance assessment. The field-weighted LSI with BERT-enhanced indexing configuration achieved the highest performance with a mean NDCG@10 of **0.9716**, significantly outperforming traditional baselines including BM25 (0.9581) and basic LSI variants. The BERT re-ranking component, fine-tuned on 100,000 MS MARCO query-abstract pairs, demonstrated exceptional semantic similarity assessment with accuracy, precision, and recall scores all exceeding 0.986.
 
-- Browser-based frontend for interactive searching
-- Multiple search index types (BM25, LSI basic, LSI field-weighted, BERT-enhanced LSI)
-- Command-line interface for indexing, searching and evaluation
-- BERT-FAISS reranking for improved search quality (with GPU acceleration)
+![png](img/evaluation_results.png)
+
+## Demo
+
+!(mp4)[img/Latent Semantic Search Engine.mp4]
+
+## Dataset
+
+The system is implemented using 21,841 academic papers from the CORE dataset, providing a diverse collection across disciplines, time periods, and sources. The architecture is designed to scale efficiently to larger collections, with the ultimate goal of handling the full CORE dataset containing over 300 million scholarly resources.
 
 ## Installation
 
@@ -83,7 +98,11 @@ This will start:
 
 You can then access the application by opening your browser to http://localhost:5173
 
+### Indexing Documents and Model Setup
 
+**Important note:** If you received this application via Dropbox, the indexes are already built and the BERT model (and the judgeblender LLMs) are already downloaded. You can skip the rest of this instructions and go directly to running the application.
+
+**Only if cloning from GitHub:** You'll need to build the search indexes and download the BERT model (and the judgeblender LLMs from hugging face if you intend to test the evaluation) before using the application.
 
 To build the indexes:
 
@@ -102,3 +121,5 @@ python src/main.py download-bert-model
 ```
 
 This will download the necessary BERT model from Hugging Face for improved search result ranking.
+
+
