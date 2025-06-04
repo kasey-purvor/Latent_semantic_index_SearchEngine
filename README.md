@@ -1,7 +1,7 @@
 # Latent Semantic Index Search Engine
 
 A sophisticated search engine that provides semantic search capabilities over academic papers, combining the power of Latent Semantic Indexing (LSI) with modern BERT-based neural language models to address synonymy and polysemy challenges in scholarly literature retrieval.
-!(png)[img/search_demo]
+![png](img/search_demo)
 ## Project Overview
 
 This search engine implements a hybrid two-stage architecture that combines field-weighted Latent Semantic Indexing (LSI) with BERT-based neural language models. 
@@ -34,7 +34,7 @@ Our **complete hybrid system** was evaluated on 30 academic queries using NDCG@1
 
 ## Demo
 
-!(mp4)[img/Latent Semantic Search Engine.mp4]
+![mp4](img/latent_semantic_search_engine.mp4)
 
 ## Dataset
 
